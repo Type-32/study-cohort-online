@@ -11,7 +11,8 @@ export default defineNuxtConfig({
 		'@nuxthub/core',
 		'@vueuse/nuxt',
 		'nuxt-security',
-		'motion-v/nuxt'
+		'motion-v/nuxt',
+		'vue3-pixi-nuxt'
 	],
 
 	devtools: {
