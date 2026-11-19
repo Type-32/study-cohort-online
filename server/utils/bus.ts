@@ -20,12 +20,17 @@ function listen() {
 	})
 }
 
+/**
+ * Resolves once this instance is LISTENing (about 1.6s on a cold instance against the
+ * production database). Read a snapshot only after it resolves, or changes made in between are lost.
+ */
 export function addPeer(peer: BusPeer) {
 	peers.add(peer)
 	listening ??= Promise.resolve().then(listen).catch((error) => {
 		listening = undefined
 		console.error(error)
 	})
+	return listening
 }
 
 export function removePeer(peer: BusPeer) {

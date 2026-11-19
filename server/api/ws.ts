@@ -6,7 +6,9 @@ export default defineWebSocketHandler({
 		const { user } = await getUserSession(request)
 		if (!user) return new Response('Unauthorized', { status: 401 })
 	},
-	open: addPeer,
+	async open(peer) {
+		await addPeer(peer)
+	},
 	message(peer, message) {
 		peer.send(message.text())
 	},

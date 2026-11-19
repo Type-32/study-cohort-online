@@ -57,10 +57,6 @@ export default defineNuxtConfig({
 
 	css: ['~/assets/css/main.css'],
 
-	routeRules: {
-		'/': {prerender: true}
-	},
-
 	security: {
 		headers: {
 			contentSecurityPolicy: {
@@ -79,11 +75,9 @@ export default defineNuxtConfig({
 	},
 
 	runtimeConfig: {
-		oauth: {
-			github: {
-				clientId: '',
-				clientSecret: ''
-			}
+		session: {
+			// The cookie is the identity for invite accounts; losing it needs a re-entry link.
+			maxAge: 60 * 60 * 24 * 365,
 		},
 		public: {
 			siteName: '',

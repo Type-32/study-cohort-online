@@ -13,7 +13,7 @@ Target: the handoff's first prototype, one house played with friends for two wee
 | Hosting | Vercel Functions with Fluid compute | One long-lived Node process in Docker |
 | Realtime | Nitro v2 WebSockets (`nitro.experimental.websocket`), bridged to Vercel by a custom entry | Same handler, different host |
 | Live state | Stored in Postgres, fanned out with `LISTEN/NOTIFY` | In memory |
-| Sign-in | Invite link, then a display name, then a long-lived sealed cookie. Logto stays as an optional second path | Invite codes only |
+| Sign-in | Invite link, then a display name, then a long-lived sealed cookie. No OAuth (Logto removed) | Invite codes only |
 | First admin | The first account created becomes `admin` | Not specified |
 | Nuxt | Stay on 4.6.4 stable. Move to Nitro v3 when Nuxt 4.7 is released | Not specified |
 
@@ -64,40 +64,39 @@ Deploy notes:
 
 - `DATABASE_URL` must be set for the build as well as at runtime: NuxtHub picks the database driver at build time and falls back to PGlite without it.
 - Build on Vercel, not locally with `--prebuilt`: the function's `runtime` is taken from the building machine's Node version (`nodejs26.x` locally).
-- Until step 1, blob storage resolves to Vercel Blob on Vercel builds; nothing uses it yet.
+- `.env` verified (Nov 18): the database is PostgreSQL 16, a direct connection (same backend PID across queries, so not a transaction pooler), and `LISTEN/NOTIFY` works. Registering `LISTEN` takes about 1.6s from here. MEGA S4 accepts the S3 driver's path-style requests (PUT, GET, list, DELETE all succeeded); `aws4fetch` is installed, and with `S3_*` set NuxtHub picks the `s3` driver over Vercel Blob.
+- The database has no tables yet. Apply the migrations (`bunx nuxt-db migrate`, which reads `.env`) before the preview, then open `/signin` and set up the house: the first account becomes the host.
 
 If the first check fails, fall back to Server-Sent Events down (`createEventStream`) and `POST` up. The bus, the message types and the client store stay the same; only the transport file changes.
 
 Delete `server/api/spike/` once the checks pass.
 
-## Step 1: accounts and housekeeping
+## Step 1: accounts and housekeeping (done Nov 18)
 
-**Schema** (one new migration)
+**Schema.** No database had a migration applied yet, so `0000_nappy_blade` was replaced by a regenerated `0000_init` rather than stacking a second migration.
 
-- `user.email` becomes nullable. It stays unique. Invite accounts have no email.
-- New `invite` table: `code` (primary key, random), `createdBy`, `userId` (nullable), `maxUses` (nullable), `uses`, `expiresAt` (nullable), `createdAt`.
+- `user.email` and `user.emailVerified` are gone, with Logto. Account ids are `randomUUID()`.
+- `invite` table: `code` (primary key, 16 random bytes, base64url), `createdBy`, `userId` (nullable), `maxUses` (nullable), `uses`, `expiresAt` (nullable), `createdAt`.
   - `userId` empty: a signup link. One link can be shared in a group chat and used until `maxUses` or `expiresAt`.
-  - `userId` set: a single-use re-entry link for that member, for a lost cookie or a new device.
+  - `userId` set: a re-entry link for that member, single use, 7 days.
 
-**Flows**
+**Flows** (logic in `server/utils/core/useServerInvites.ts`)
 
-- `/join/[code]`: shows a display-name field and a "Use Neo ID" button. A valid signup code creates the account; a re-entry code signs in the bound account.
-- Logto can sign in an existing account at any time. It creates a new account only when a valid signup code is present (carried through the redirect in a short-lived cookie). Without one it redirects to `/signin?error=invite_required`. This keeps the handoff's rule that the host controls signups.
-- No accounts yet: `/signin` offers "Set up this house", and that account gets `role: 'admin'`.
-- Admin endpoints: create, list and revoke invites; create a re-entry link for a member. Guarded with the existing `defineAbility` pattern in `shared/abilities/`.
+- `/signin`: while no account exists, "Set up this house" creates an `admin`. Concurrent setups are serialized with an advisory lock; exactly one wins. Afterwards the page says the house is invite-only.
+- `/join/[code]`: a signup link asks for a display name; a re-entry link shows "Welcome back, <name>" and a Continue button. A use is claimed by a conditional `UPDATE … RETURNING` in the same transaction as the account insert, so a failed join does not burn a use. Banned members are refused.
+- `/`: the host sees invite links (create, copy, revoke) and members (create a re-entry link). Everyone sees a sign-out button.
+- Endpoints: `GET/POST /api/v1/auth/setup`, `POST /api/v1/auth/join`, `GET /api/v1/invites/:code` (public), `GET/POST /api/v1/invites` and `DELETE /api/v1/invites/:code` (admin, `inviteAbilities().manageInvites`).
+- `POST /api/v1/auth/logout` returns JSON instead of a 302: the browser's fetch failed on the redirect, so sign-out cleared the cookie but never reloaded the page.
 
-**Session**
+**Session.** `runtimeConfig.session.maxAge` is one year. The cookie holds `{ id, role }`.
 
-- Set `runtimeConfig.session.maxAge` to one year. The cookie is the identity for invite accounts.
-- `nuxt-auth-utils` 0.6 seals the session with `appSecret` and ignores `session.password`. Replace `NUXT_SESSION_PASSWORD` with `NUXT_APP_SECRET` in `.env.example`.
+**Housekeeping.** `routeRules['/'].prerender` removed (the page is auth-gated). `runtimeConfig.oauth` and the Logto variables in `.env.example` removed. `@vercel/blob` was swapped for S3 in a separate commit.
 
-**Housekeeping**
+Verified against a throwaway Postgres 18: 35 API and page checks (setup race, use limits, expiry, revoke, re-entry, ban, admin-only endpoints, page redirects, socket auth), plus the re-entry, sign-out, signup and host-panel flows in a browser.
 
-- Remove `routeRules['/'].prerender`. The page is auth-gated and cannot be prerendered.
-- Blob: add `aws4fetch`, remove `@vercel/blob`, replace `BLOB_READ_WRITE_TOKEN` in `.env.example` with `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_BUCKET`, `S3_ENDPOINT`, `S3_REGION`. The endpoint has the form `https://s3.<region>.megas4.com`.
+Still open from the original step 1:
+
 - Dev needs `DATABASE_URL` too, pointing at a separate dev database. Without it NuxtHub falls back to PGlite, which the `LISTEN` connection cannot reach. Remove `@electric-sql/pglite` once dev runs on Postgres.
-
-Check: a second browser profile joins through an invite link and lands on `/`; a signed-out visitor without a code cannot create an account by either path.
 
 ## Step 2: socket, presence, snapshot and patch
 
@@ -122,7 +121,7 @@ type ServerMsg =
 
 **Server**
 
-- `open`: upsert `lastSeenAt = now()`, publish `member`, send `snapshot`.
+- `open`: await `addPeer` (it resolves once this instance is `LISTEN`ing), then upsert `lastSeenAt = now()`, publish `member`, send `snapshot`.
 - `ping`: update `lastSeenAt`, reply `pong`. No broadcast.
 - `close`: clear `lastSeenAt`, publish `leave`.
 - The snapshot lists members with `lastSeenAt` inside the last 60 seconds.
@@ -165,7 +164,7 @@ Check: a late joiner starts within two seconds of the others; pause and resume s
 
 - Add `pixi.js`. A client-only component draws the scene from a theme-pack JSON (backdrop, slots, object sprites) stored in S4.
 - The YouTube iframe is positioned over the canvas at the theme's TV slot. Nuxt UI panels sit above.
-- First real use of the blob driver. Confirm here that MEGA S4 accepts the path-style URLs the driver sends (`endpoint/bucket/key`).
+- First real use of the blob driver. MEGA S4's path-style support was confirmed in step 0.
 
 ## Step 7: traces
 

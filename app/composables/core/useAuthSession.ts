@@ -6,14 +6,14 @@ import type { User } from "#shared/types/db";
  * Wraps nuxt-auth-utils `useUserSession()` and exposes the same interface
  * that all middleware, plugins, and components expect.
  *
- * Session payload stored in the sealed cookie: { id, role, emailVerified }
+ * Session payload stored in the sealed cookie: { id, role }
  * Full User record is available by fetching from the DB via API routes.
  */
 export function useAuthSession() {
 	const { user: sessionUser, session, fetch, clear, loggedIn, ready } = useUserSession();
 
 	// Cast the nuxt-auth-utils User (augmented in app/types/auth.d.ts) to the full DB User type.
-	// The cookie only stores id/role/emailVerified; other fields will be undefined on the client.
+	// The cookie only stores id/role; other fields will be undefined on the client.
 	const userState = useState<User | null | undefined>('auth.user', () => null)
 	const requestFetch = useRequestFetch()
 	const requestHeaders = import.meta.server ? useRequestHeaders() : undefined;

@@ -33,5 +33,6 @@ export type User = InferSelectModel<typeof schema.user>;
 export type UserInsert = InferInsertModel<typeof schema.user>;
 export type DbFile = InferSelectModel<typeof schema.file>;
 export type DbFileInsert = InferInsertModel<typeof schema.file>;
+export type Invite = InferSelectModel<typeof schema.invite>;
 
 export type UserRole = User['role']

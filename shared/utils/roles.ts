@@ -4,6 +4,5 @@ export const { getRoleLevel, hasMinRole, hasRole, satisfies, isAuthenticated } =
 	hierarchy: ['user', 'moderator', 'admin'] as const,
 	getRole: (user) => user.role,
 	getBanned: (user) => user.banned || false,
-	getVerified: (user) => !!user.email && !!user.emailVerified,
 	getAuthIndicator: (user) => !!user.id
 })

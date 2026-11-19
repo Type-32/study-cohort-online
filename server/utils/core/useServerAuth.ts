@@ -24,7 +24,7 @@ export function useServerAuth() {
 	}
 
 	/**
-	 * Returns the minimal session user (`{ id, role, emailVerified }`) cast to User, or undefined.
+	 * Returns the current user's database row, or undefined.
 	 * Does NOT throw — callers that need a guaranteed user should use `requireUser`.
 	 */
 	async function getUser(event: H3Event<EventHandlerRequest>): Promise<User | undefined> {
@@ -45,7 +45,7 @@ export function useServerAuth() {
 		if (!user || (opts && !satisfies(user, opts))) {
 			throw createError({
 				statusCode: 403,
-				statusMessage: opts?.verified && !user?.email ? "Email not verified" : "Unauthorized",
+				statusMessage: "Unauthorized",
 			});
 		}
 

@@ -33,7 +33,7 @@ export function useServerUsers() {
 			return targetUser
 		}
 
-		const { email, banned, banReason, banExpires, emailVerified, ...publicFields } = targetUser
+		const { banned, banReason, banExpires, ...publicFields } = targetUser
 		return publicFields as User
 	}
 
@@ -41,7 +41,7 @@ export function useServerUsers() {
 		await authorize(event, userAbilities().editUser, await getDbUserFromId(targetUserId))
 
 		const user = await $auth.requireUser(event)
-		const { id, createdAt, updatedAt, role, banned, banReason, banExpires, emailVerified, ...safeValues } = values
+		const { id, createdAt, updatedAt, role, banned, banReason, banExpires, ...safeValues } = values
 
 		const [updatedUser] = await db.update(schema.user)
 			.set({
