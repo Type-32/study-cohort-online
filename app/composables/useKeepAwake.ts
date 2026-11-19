@@ -14,6 +14,9 @@ export function useKeepAwake() {
 	let context: AudioContext | undefined;
 
 	function start() {
+		// Browsers only let an AudioContext start after a click or key press on the page; creating one
+		// earlier logs a warning and leaves it suspended. The listeners below retry on the first gesture.
+		if (!navigator.userActivation?.hasBeenActive) return;
 		if (context) return void context.resume();
 		context = new AudioContext();
 		const tone = context.createOscillator();
@@ -42,9 +45,9 @@ export function useKeepAwake() {
 		watch(enabled, (on) => (on ? start() : stop()), { immediate: true });
 	});
 
-	// Autoplay rules keep a new AudioContext suspended until the user interacts with the page.
-	useEventListener("pointerdown", () => enabled.value && context?.state === "suspended" && start(), { passive: true });
-	useEventListener("keydown", () => enabled.value && context?.state === "suspended" && start(), { passive: true });
+	const startOnGesture = () => enabled.value && context?.state !== "running" && start();
+	useEventListener("pointerdown", startOnGesture, { passive: true });
+	useEventListener("keydown", startOnGesture, { passive: true });
 
 	onScopeDispose(stop);
 

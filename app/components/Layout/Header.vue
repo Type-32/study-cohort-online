@@ -31,17 +31,27 @@ const menu = computed<DropdownMenuItem[][]>(() => [
 </script>
 
 <template>
-	<UHeader :toggle="false" to="/">
+	<UHeader
+		:toggle="false"
+		to="/"
+		:ui="{
+			root: 'border-none bg-transparent backdrop-blur-none',
+			container: 'max-w-2xl',
+			title: 'text-lg font-semibold font-serif',
+		}"
+	>
 		<template #title>
 			<UIcon name="i-pixelarticons-lightbulb-on" class="size-5 text-primary" />
-			<span class="font-brand">{{ $rc.public.siteName || "Study House" }}</span>
+			{{ $rc.public.siteName || "Study House" }}
 		</template>
 
 		<template #right>
-			<UColorModeButton />
+			<UColorModeButton color="neutral" variant="ghost" />
 			<template v-if="user">
 				<USlideover v-if="user.role === 'admin'" title="Manage house" description="Invite people in, and get members back in on a new device.">
-					<UButton label="Manage house" icon="i-pixelarticons-sliders" color="neutral" variant="ghost" :ui="{ label: 'hidden sm:inline' }" />
+					<UTooltip text="Manage house">
+						<UButton icon="i-pixelarticons-sliders" aria-label="Manage house" color="neutral" variant="ghost" />
+					</UTooltip>
 					<template #body>
 						<HostPanel />
 					</template>
@@ -50,12 +60,11 @@ const menu = computed<DropdownMenuItem[][]>(() => [
 				<UDropdownMenu :items="menu" :content="{ align: 'end' }">
 					<UButton
 						:avatar="{ alt: user.username }"
-						:label="user.username"
 						:loading="signingOut"
+						:aria-label="`${user.username}'s menu`"
 						color="neutral"
 						variant="ghost"
-						trailing-icon="i-pixelarticons-chevron-down"
-						:ui="{ label: 'hidden sm:inline' }"
+						square
 					/>
 				</UDropdownMenu>
 			</template>
