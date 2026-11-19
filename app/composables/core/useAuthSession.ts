@@ -29,16 +29,14 @@ export function useAuthSession() {
 			console.debug('watch user', unref(userState))
 	}
 
-	async function signOut(reloadWindow: boolean = true) {
-		await requestFetch("/api/v1/auth/logout", {
-			method: 'post',
-			headers: requestHeaders,
-		});
-		userState.value = null
+	async function signOut(redirect: boolean = true) {
+		// nuxt-auth-utils' clear() deletes the session cookie server-side; one request, then go straight
+		// to /signin instead of reloading "/" and being redirected there.
 		await clear();
+		userState.value = null
 
-		if (reloadWindow)
-			window.location.reload()
+		if (redirect)
+			window.location.assign('/signin')
 	}
 
 	return {

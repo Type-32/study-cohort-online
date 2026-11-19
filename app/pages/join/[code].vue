@@ -21,8 +21,8 @@ async function join(username?: string) {
 		await $fetch("/api/v1/auth/join", { method: "POST", body: { code, username } });
 		await useAuthSession().refresh();
 		await navigateTo("/");
-	} catch (error: any) {
-		toast.add({ title: error.data?.statusMessage ?? "Could not join.", color: "error" });
+	} catch (error) {
+		toast.add({ title: fetchErrorMessage(error) ?? "Could not join.", color: "error", icon: "i-pixelarticons-alert" });
 	}
 }
 </script>
@@ -35,7 +35,7 @@ async function join(username?: string) {
 				v-if="invite?.kind === 'reentry'"
 				:title="`Welcome back, ${invite.username}`"
 				description="This link signs you in on this device."
-				icon="i-lucide-door-open"
+				icon="i-pixelarticons-login"
 			>
 				<template #footer>
 					<UButton label="Continue" block loading-auto @click="join()" />
@@ -45,17 +45,18 @@ async function join(username?: string) {
 				v-else-if="invite"
 				title="Come on in"
 				description="Pick the name the others will see."
-				icon="i-lucide-door-open"
+				icon="i-pixelarticons-login"
 				:schema="schema"
 				:fields="[{ name: 'username', type: 'text', label: 'Display name', required: true }]"
 				:submit="{ label: 'Join' }"
+				loading-auto
 				@submit="(event: FormSubmitEvent<z.output<typeof schema>>) => join(event.data.username)"
 			/>
 			<UAuthForm
 				v-else
 				title="This invite link doesn't work"
 				description="It may be used up, expired, or revoked. Ask the host for a new one."
-				icon="i-lucide-door-closed"
+				icon="i-pixelarticons-door-closed"
 			/>
 		</UPageCard>
 	</UMain>

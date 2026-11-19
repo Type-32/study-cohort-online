@@ -7,6 +7,7 @@
       "dependencies": {
         "@electric-sql/pglite": "^0.5.16",
         "@iconify-json/lucide": "^1.2.156",
+        "@iconify-json/pixelarticons": "^1.2.10",
         "@iconify-json/simple-icons": "^1.2.103",
         "@internationalized/date": "^3.12.4",
         "@nuxt/fonts": "^1.2.0",
@@ -35,6 +36,7 @@
       },
       "devDependencies": {
         "@types/node": "^26.6.6",
+        "@types/youtube": "^0.3.0",
         "typescript": "6.0.3",
         "vue-tsc": "^3.3.14",
       },
@@ -198,6 +200,8 @@
     "@floating-ui/vue": ["@floating-ui/vue@2.0.1", "", { "dependencies": { "@floating-ui/dom": "^1.8.0", "@floating-ui/utils": "^0.2.12" }, "peerDependencies": { "vue": ">=3.3.0" } }, "sha512-043dyEKD9TDSfz080YH2vobubgg+NIo/9Fw4RAl7sEMpD8Am1DNrrSTl/GpMBjyGHoD/FbJY2QLawY+HSQsEIA=="],
 
     "@iconify-json/lucide": ["@iconify-json/lucide@1.2.156", "", { "dependencies": { "@iconify/types": "*" } }, "sha512-IOB3g2X+cmpoEPcjEbGfpDWPPzXioeDW2gnYgaNxYSaVEHyM4fQqP2uz29cdRQJbQwo5CTQ8D9NJnATeCQKatQ=="],
+
+    "@iconify-json/pixelarticons": ["@iconify-json/pixelarticons@1.2.10", "", { "dependencies": { "@iconify/types": "*" } }, "sha512-bGUjTf8BRz0Abr5VNdy2rEB8eUB0evlaVtD4YlHSC16T7Yj70X8CRhEoetgHJJEbFu61veDWPcg71lp1H1NSSg=="],
 
     "@iconify-json/simple-icons": ["@iconify-json/simple-icons@1.2.103", "", { "dependencies": { "@iconify/types": "*" } }, "sha512-FMn+aVTsqQdYOwf5reCXXtfWapb+4ijI6WrU8ej1spWXWfA+d41TBXcKagHFwiHZyqt7kP7F04AiG1dYj2R06w=="],
 
@@ -712,6 +716,8 @@
     "@types/resolve": ["@types/resolve@1.20.2", "", {}, "sha512-60BCwRFOZCQhDncwQdxxeOEEkbc5dIMccYLwbxsS4TUNeVECQ/pBJ0j09mrHOl/JJvpRPGwO9SvE4nR2Nb/a4Q=="],
 
     "@types/web-bluetooth": ["@types/web-bluetooth@0.0.21", "", {}, "sha512-oIQLCGWtcFZy2JW77j9k8nHzAOpqMHLQejDA48XXMWH6tjCQHz5RCFz1bzsmROyL6PUm+LLnUiI4BCn221inxA=="],
+
+    "@types/youtube": ["@types/youtube@0.3.0", "", {}, "sha512-a+JnwvmYfCShUv2fPs9JL/rUr9JGx5BPjSn7sp3V5UEyyj2AIVkSCRlVoe4CjFBrkBIv9jMpOPakfitMq7tegA=="],
 
     "@typescript-eslint/project-service": ["@typescript-eslint/project-service@8.73.0", "", { "dependencies": { "@typescript-eslint/tsconfig-utils": "^8.73.0", "@typescript-eslint/types": "^8.73.0", "debug": "^4.4.3" }, "peerDependencies": { "typescript": ">=4.8.4 <6.1.0" } }, "sha512-/pEf8Rc4Mjk+qJnY0uO1+Gadeal8uv50xpuic+srG2vIVatA0XxvWMUeMtFvs6OCHqftiQ7/+qH4aehG5stzIA=="],
 

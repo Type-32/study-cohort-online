@@ -1,87 +1,71 @@
 <script setup lang="ts">
-import { useAuthSession } from "~/composables/core/useAuthSession";
-import type { InviteWithUser } from "#shared/types/fetch";
-import type { Invite, User } from "#shared/types/db";
-
 useHead({ title: "Home" });
 
 definePageMeta({
 	middleware: ["signin-if-session-invalid"],
 });
 
-const $as = useAuthSession();
-const isAdmin = computed(() => $as.user.value?.role === "admin");
-const toast = useToast();
-const { copy } = useClipboard({ legacy: true });
-const { house, status } = useHouse();
-
-// ponytail: host panel lives on the home page until there is a room to put it beside.
-const { data: invites, refresh: refreshInvites } = await useFetch<InviteWithUser[]>("/api/v1/invites", { immediate: isAdmin.value });
-const { data: members } = await useFetch<User[]>("/api/v1/users", { immediate: isAdmin.value });
-
-const origin = useRequestURL().origin;
-
-async function copyLink(code: string, description?: string) {
-	await copy(`${origin}/join/${code}`);
-	toast.add({ title: "Link copied", description, color: "success" });
-}
-
-async function createInvite(userId?: string) {
-	const invite = await $fetch<Invite>("/api/v1/invites", { method: "POST", body: { userId } });
-	if (isAdmin.value) await refreshInvites();
-	await copyLink(invite.code, userId === $as.user.value?.id ? "Open it on your other device. It works once, for 7 days." : undefined);
-}
-
-async function revokeInvite(code: string) {
-	await $fetch(`/api/v1/invites/${code}`, { method: "DELETE" });
-	await refreshInvites();
-}
+const { house, status, clockOffsetMs, sendIntent } = useHouse();
+// The socket opens after hydration; until the first snapshot there is nothing true to show.
+const connected = computed(() => status.value === "OPEN");
+const now = useNow({ interval: 1000 });
+const focusing = computed(() => !!house.value.timer && house.value.timer.endsAtServerMs > now.value.getTime() + clockOffsetMs.value);
+const { enabled: keepAwake } = useKeepAwake();
 </script>
 
 <template>
 	<UMain>
-		<UContainer class="flex flex-col gap-6 py-8">
-			<div class="flex items-center justify-between">
-				<p>Signed in as <strong>{{ $as.user.value?.username }}</strong></p>
-				<div class="flex gap-2">
-					<UButton label="Sign in on another device" color="neutral" variant="ghost" icon="i-lucide-smartphone" @click="createInvite($as.user.value?.id)" />
-					<UButton label="Sign out" color="neutral" variant="ghost" icon="i-lucide-log-out" @click="$as.clear()" />
-				</div>
-			</div>
+		<UContainer class="flex max-w-3xl flex-col gap-10 py-10">
+			<FocusTimer
+				:timer="house.timer"
+				:clock-offset-ms="clockOffsetMs"
+				@start="(minutes) => sendIntent({ t: 'timer', action: 'start', minutes })"
+				@stop="sendIntent({ t: 'timer', action: 'stop' })"
+			/>
 
-			<UPageCard title="In the house" :description="status === 'OPEN' ? undefined : 'Connecting…'">
-				<ul class="flex flex-wrap gap-2">
-					<li v-for="member in house.members" :key="member.userId">
-						<UBadge :label="member.username" color="neutral" variant="subtle" icon="i-lucide-lamp-desk" />
+			<HouseRadio
+				:radio="house.radio"
+				:clock-offset-ms="clockOffsetMs"
+				@intent="(intent) => sendIntent({ t: 'radio', ...intent })"
+			/>
+
+			<section class="flex flex-col gap-4" aria-labelledby="in-the-house">
+				<div class="flex items-center gap-2">
+					<h2 id="in-the-house" class="text-lg font-semibold text-highlighted">In the house</h2>
+					<UBadge v-if="connected" :label="String(house.members.length)" color="neutral" variant="subtle" size="sm" />
+					<UBadge
+						v-else
+						label="Connecting"
+						icon="i-pixelarticons-loader"
+						color="warning"
+						variant="subtle"
+						size="sm"
+						:ui="{ leadingIcon: 'animate-spin' }"
+					/>
+				</div>
+
+				<div v-if="!connected && !house.members.length" class="grid gap-3 sm:grid-cols-2">
+					<USkeleton v-for="n in 2" :key="n" class="h-12" />
+				</div>
+				<ul v-else class="grid gap-3 sm:grid-cols-2">
+					<li v-for="member in house.members" :key="member.userId" class="rounded-lg border border-default p-3">
+						<UUser
+							:name="member.username"
+							:description="focusing ? 'Focusing' : 'Here now'"
+							:avatar="{ alt: member.username }"
+							:chip="{ color: 'success', position: 'bottom-right' }"
+						/>
 					</li>
 				</ul>
-			</UPageCard>
+			</section>
 
-			<template v-if="isAdmin">
-				<UPageCard title="Invite links" description="Anyone with a signup link can join until you revoke it. Re-entry links work once, for 7 days.">
-					<UButton label="New signup link" icon="i-lucide-link" class="w-fit" @click="createInvite()" />
-					<ul class="divide-y divide-default">
-						<li v-for="invite in invites" :key="invite.code" class="flex items-center gap-3 py-2">
-							<span class="flex-1 truncate text-sm">
-								{{ invite.user ? `Re-entry for ${invite.user.username}` : "Signup" }}
-								· used {{ invite.uses }}{{ invite.maxUses ? ` of ${invite.maxUses}` : "" }}
-								<template v-if="invite.expiresAt">· expires {{ new Date(invite.expiresAt).toLocaleDateString() }}</template>
-							</span>
-							<UButton icon="i-lucide-copy" color="neutral" variant="ghost" aria-label="Copy link" @click="copyLink(invite.code)" />
-							<UButton icon="i-lucide-trash" color="error" variant="ghost" aria-label="Revoke link" @click="revokeInvite(invite.code)" />
-						</li>
-					</ul>
-				</UPageCard>
-
-				<UPageCard title="Members" description="A member on a new device, or who cleared their cookies, needs a re-entry link.">
-					<ul class="divide-y divide-default">
-						<li v-for="member in members" :key="member.id" class="flex items-center gap-3 py-2">
-							<span class="flex-1">{{ member.username }} <UBadge v-if="member.role !== 'user'" :label="member.role" variant="subtle" /></span>
-							<UButton v-if="member.id !== $as.user.value?.id" label="Re-entry link" color="neutral" variant="subtle" @click="createInvite(member.id)" />
-						</li>
-					</ul>
-				</UPageCard>
-			</template>
+			<USwitch
+				v-model="keepAwake"
+				label="Keep this tab awake"
+				:description="keepAwake
+					? 'Your browser won\'t put this tab to sleep, so you stay in the house and the radio keeps playing in the background.'
+					: 'Saves a little battery, but your browser may put this tab to sleep: you\'ll drop out of the house and the radio will pause until you come back.'"
+			/>
 		</UContainer>
 	</UMain>
 </template>

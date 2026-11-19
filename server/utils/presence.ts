@@ -2,7 +2,7 @@ import { db, schema } from '@nuxthub/db'
 import { and, eq, gt, lt, sql } from 'drizzle-orm'
 import { publish } from '#server/utils/bus'
 import { PING_INTERVAL_MS } from '#shared/utils/realtime'
-import type { HouseState, MemberState } from '#shared/utils/realtime'
+import type { MemberState } from '#shared/utils/realtime'
 
 const { connection, user } = schema
 
@@ -31,10 +31,9 @@ export async function disconnect(connectionId: string, userId: string) {
 	if (!other) await publish({ t: 'leave', userId })
 }
 
-export async function snapshot(): Promise<HouseState> {
-	const members = await db.selectDistinct({ userId: user.id, username: user.username })
+export async function presentMembers(): Promise<MemberState[]> {
+	return db.selectDistinct({ userId: user.id, username: user.username })
 		.from(connection)
 		.innerJoin(user, eq(user.id, connection.userId))
 		.where(fresh())
-	return { members }
 }

@@ -1,8 +1,34 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
 
-@theme static {
-	--font-sans: "Geist", "Inter", sans-serif;
-	--font-mono: "Geist Mono", "JetBrains Mono", "Consolas", monospace, sans-serif;
-	--font-brand: "Space Grotesk", "Geist";
+@theme {
+	--font-sans: 'DM Sans', sans-serif;
+	--font-serif: 'Source Serif 4', serif;
+	--font-mono: 'JetBrains Mono', monospace;
+}
+
+/* until v5 ships --ui-font-heading */
+@layer base {
+	h1, h2, h3, h4, h5, h6 {
+		font-family: var(--font-serif);
+	}
+}
+
+:root {
+	--ui-radius: 0.5rem;
+}
+
+:root, .light {
+	--ui-bg: var(--ui-color-neutral-50);
+	--ui-bg-muted: var(--ui-color-neutral-100);
+	--ui-text-inverted: var(--ui-color-neutral-50);
+}
+
+.dark {
+	--ui-bg-inverted: var(--ui-color-neutral-50);
+	--ui-text-highlighted: var(--ui-color-neutral-50);
+	--ui-border-inverted: var(--ui-color-neutral-50);
+	--ui-bg: var(--ui-color-neutral-900);
+	--ui-bg-muted: var(--ui-color-neutral-800);
+	--ui-text-inverted: var(--ui-color-neutral-900);
 }
