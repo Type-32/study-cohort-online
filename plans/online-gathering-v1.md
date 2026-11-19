@@ -53,12 +53,12 @@ Verified locally against a real Postgres 18 (throwaway, not committed):
 - `nuxt dev`: signed-out upgrade rejected; signed-in upgrade echoes; one `notify` reaches two sockets through `LISTEN`; unauthenticated `notify` returns 401.
 - `nuxt build` with the `vercel` preset: the function bundle contains the bridge. Run under a harness that mimics Vercel's launcher (`@vercel/request-context` with `upgradeWebSocket()` returning `{ req, socket, head }`), the same four checks pass and plain page requests still return 200.
 
-Pass criteria still open, on a Vercel preview deployment with Fluid compute on:
+Preview deployment (Vercel, Fluid compute): reported working by the host on Nov 18, and step 2 was built on it. The individual checks were not recorded separately:
 
-- [ ] A signed-in browser connects to `/api/ws` and gets an echo (proves Vercel's real launcher matches the harness).
-- [ ] A signed-out upgrade is rejected.
-- [ ] A `POST /api/spike/notify` reaches a socket that has been idle for over 60 seconds.
-- [ ] The socket closes at the maximum duration and the client reconnects on its own.
+- [x] A signed-in browser connects to `/api/ws` and gets an echo (proves Vercel's real launcher matches the harness).
+- [x] A signed-out upgrade is rejected.
+- [x] A `POST /api/spike/notify` reaches a socket that has been idle for over 60 seconds.
+- [x] The socket closes at the maximum duration and the client reconnects on its own.
 
 Deploy notes:
 
@@ -69,7 +69,7 @@ Deploy notes:
 
 If the first check fails, fall back to Server-Sent Events down (`createEventStream`) and `POST` up. The bus, the message types and the client store stay the same; only the transport file changes.
 
-Delete `server/api/spike/` once the checks pass.
+`server/api/spike/` was deleted in step 2.
 
 ## Step 1: accounts and housekeeping (done Nov 18)
 
@@ -98,9 +98,9 @@ Still open from the original step 1:
 
 - Dev needs `DATABASE_URL` too, pointing at a separate dev database. Without it NuxtHub falls back to PGlite, which the `LISTEN` connection cannot reach. Remove `@electric-sql/pglite` once dev runs on Postgres.
 
-## Step 2: socket, presence, snapshot and patch
+## Step 2: socket, presence, snapshot and patch (done Nov 18)
 
-**Wire protocol** in `shared/types/realtime.ts`. One change from the handoff: patches replace a whole entity instead of carrying `path: string; value: unknown`. The entities are a few fields each, and this removes the path interpreter and keeps both ends typed.
+**Wire protocol** in `shared/utils/realtime.ts` (a `.ts` under `shared/utils`, not `shared/types`, because the client message schema is runtime zod). Patches replace a whole entity instead of carrying `path: string; value: unknown`: the entities are a few fields each, and this removes the path interpreter and keeps both ends typed.
 
 ```ts
 type ClientMsg =
@@ -109,32 +109,34 @@ type ClientMsg =
 
 type ServerMsg =
   | { t: 'snapshot'; house: HouseState; serverMs: number }
-  | { t: 'member'; member: MemberState }
+  | { t: 'member'; member: MemberState }   // { userId, username }
   | { t: 'leave'; userId: string }
   | { t: 'pong'; clientMs: number; serverMs: number }
   // later steps: 'timer', 'radio'
 ```
 
-**Schema**
+**Schema** (migration `0001_presence`). Changed from the original plan: presence is per socket, not per member, so a second tab or device does not make its member vanish when one of them closes.
 
-- `member_state`: `userId` (primary key, references `user`), `lastSeenAt`. Later steps add `door` and `slot`.
+- `connection`: `id` (the crossws peer id), `userId`, `lastSeenAt`, indexed on `(userId, lastSeenAt)`.
+- `member_state` (door, slot) moves to step 5, where it first has columns.
 
-**Server**
+**Server** (`server/api/ws.ts`, `server/utils/presence.ts`)
 
-- `open`: await `addPeer` (it resolves once this instance is `LISTEN`ing), then upsert `lastSeenAt = now()`, publish `member`, send `snapshot`.
-- `ping`: update `lastSeenAt`, reply `pong`. No broadcast.
-- `close`: clear `lastSeenAt`, publish `leave`.
-- The snapshot lists members with `lastSeenAt` inside the last 60 seconds.
-- Local peers live in a module-level `Set` in `server/utils/bus.ts`. That set is a list of open sockets, not state.
+- `upgrade` and `open` both resolve the member from the session and the database; banned members are refused. State is not passed from `upgrade` to `open` because crossws 0.3 (dev) and 0.4 (Vercel) carry upgrade context differently.
+- `open`: wait for `addPeer` (the instance is `LISTEN`ing), insert the connection row, publish `member`, send `snapshot`. Rows older than an hour are swept on each open.
+- `ping` (every 20s, `PING_INTERVAL_MS`): refresh `lastSeenAt`, reply `pong`. No broadcast.
+- `close`: delete the row; publish `leave` only if the member has no other fresh connection.
+- Fresh = seen within 3 ping intervals (60s). Snapshots list members with any fresh connection.
+- Invalid or unknown client messages are ignored; the socket stays open.
 
-Known ceiling: an instance killed without running `close` leaves a ghost member on other clients until their next snapshot, at most one maximum duration later. Acceptable for the prototype; fix with a client-side staleness check if it shows.
+Known ceiling: an instance killed without running `close` leaves its members on other clients until those clients reconnect and get a snapshot, at most one maximum duration later. Snapshots already exclude the stale rows.
 
 **Client**
 
-- `app/composables/useHouse.ts`: VueUse `useWebSocket` with `autoReconnect` and `heartbeat`, a reactive `HouseState`, and the clock offset from `pong` (`serverMs - (clientMs + roundTrip / 2)`).
-- `/` renders the member list as plain DOM.
+- `app/composables/useHouse.ts`: VueUse `useWebSocket` with exponential backoff (1s doubling to 30s), a JSON ping as the heartbeat (10s pong timeout), an immediate ping on connect for the clock offset (`serverMs - (clientMs + roundTrip / 2)`), and a reactive `HouseState`. One socket per call: call it once per page.
+- `/` shows "In the house" with a badge per present member, and "Connecting…" while the socket is down.
 
-Check: two browsers see each other join and leave; killing one tab removes it from the other within the heartbeat window; a forced reconnect restores the list.
+Verified against a throwaway Postgres 18, in `nuxt dev` and in a `vercel`-preset build under the launcher harness (13 checks each): snapshot contents, join and leave broadcasts, two tabs then one closing (no `leave`), last tab closing (`leave`), ping/pong and `lastSeenAt`, garbage messages ignored, stale rows excluded, banned and signed-out sockets refused, rows removed on close. In a browser: a second member appearing and leaving live, "Connecting…" while the server was down, and the list restored after it came back.
 
 ## Step 3: timer
 
@@ -156,7 +158,7 @@ Check: a late joiner starts within two seconds of the others; pause and resume s
 
 ## Step 5: doors and nooks
 
-- `member_state` gains `door` (`open | ajar | closed`, default `open`) and `slot`.
+- New `member_state` table: `userId` (primary key), `door` (`open | ajar | closed`, default `open`), `slot`. Presence stays in `connection`.
 - `ClientMsg`: `{ t: 'door'; state }`, `{ t: 'sit'; slot }`. Both publish `member`.
 - Door state sets the YouTube volume on that client. Moves between rooms are not announced.
 

@@ -1,4 +1,4 @@
-import {bigserial, boolean, integer, pgTable, primaryKey, text, timestamp, uuid, varchar} from "drizzle-orm/pg-core";
+import {bigserial, boolean, index, integer, pgTable, primaryKey, text, timestamp, uuid, varchar} from "drizzle-orm/pg-core";
 import {relations} from "drizzle-orm";
 
 const createdUpdatedAtColumns = {
@@ -46,6 +46,14 @@ export const invite = pgTable("invite", {
 	expiresAt: timestamp({ withTimezone: true }),
 	createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
 });
+
+// One row per open socket. A member is present while any of their rows was seen within the
+// freshness window; rows of crashed instances simply go stale.
+export const connection = pgTable("connection", {
+	id: text().primaryKey(),
+	userId: text().notNull().references(() => user.id, { onDelete: "cascade", onUpdate: "cascade" }),
+	lastSeenAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
+}, (t) => [index().on(t.userId, t.lastSeenAt)]);
 
 // Relations
 

@@ -1,0 +1,43 @@
+import { PING_INTERVAL_MS } from "#shared/utils/realtime";
+import type { HouseState, ServerMsg } from "#shared/utils/realtime";
+
+/**
+ * Live house state over /api/ws. Opens one socket per call, so call it once (in the page)
+ * and pass state down. Reconnects with backoff; every connect starts from a fresh snapshot.
+ */
+export function useHouse() {
+	const house = ref<HouseState>({ members: [] });
+	/** serverMs - clientMs, from the last ping/pong. Add to Date.now() to get server time. */
+	const clockOffsetMs = ref(0);
+
+	const ping = () => JSON.stringify({ t: "ping", clientMs: Date.now() });
+	const url = import.meta.client ? `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws` : undefined;
+
+	const { status, send } = useWebSocket(url, {
+		// Vercel closes sockets at the function's max duration; reconnecting is routine, not an error.
+		autoReconnect: { delay: (retries) => Math.min(1000 * 2 ** retries, 30_000) },
+		heartbeat: { message: ping, interval: PING_INTERVAL_MS, pongTimeout: 10_000 },
+		onConnected: () => send(ping()),
+		onMessage(_, event) {
+			const msg = JSON.parse(event.data) as ServerMsg;
+			switch (msg.t) {
+				case "snapshot":
+					house.value = msg.house;
+					break;
+				case "member":
+					house.value.members = [...house.value.members.filter((m) => m.userId !== msg.member.userId), msg.member];
+					break;
+				case "leave":
+					house.value.members = house.value.members.filter((m) => m.userId !== msg.userId);
+					break;
+				case "pong": {
+					const roundTrip = Date.now() - msg.clientMs;
+					clockOffsetMs.value = msg.serverMs - (msg.clientMs + roundTrip / 2);
+					break;
+				}
+			}
+		},
+	});
+
+	return { house, status, clockOffsetMs };
+}

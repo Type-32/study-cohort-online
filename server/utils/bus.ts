@@ -1,6 +1,7 @@
 import postgres from 'postgres'
 import { sql } from 'drizzle-orm'
 import { db } from '@nuxthub/db'
+import type { ServerMsg } from '#shared/utils/realtime'
 
 // Every instance relays one Postgres channel to its own sockets, so a change
 // written on any instance reaches every peer. See plans/online-gathering-v1.md.
@@ -38,6 +39,6 @@ export function removePeer(peer: BusPeer) {
 }
 
 /** Sends `msg` to every connected peer on every instance. */
-export async function publish(msg: unknown) {
+export async function publish(msg: ServerMsg) {
 	await db.execute(sql`select pg_notify(${CHANNEL}, ${JSON.stringify(msg)})`)
 }
