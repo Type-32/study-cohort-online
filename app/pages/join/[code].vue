@@ -21,8 +21,8 @@ async function join(username?: string) {
 		await $fetch("/api/v1/auth/join", { method: "POST", body: { code, username } });
 		await useAuthSession().refresh();
 		await navigateTo("/");
-	} catch (error: any) {
-		toast.add({ title: error.data?.statusMessage ?? "Could not join.", color: "error" });
+	} catch (error) {
+		toast.add({ title: fetchErrorMessage(error) ?? "Could not join.", color: "error", icon: "i-lucide-circle-alert" });
 	}
 }
 </script>
@@ -49,6 +49,7 @@ async function join(username?: string) {
 				:schema="schema"
 				:fields="[{ name: 'username', type: 'text', label: 'Display name', required: true }]"
 				:submit="{ label: 'Join' }"
+				loading-auto
 				@submit="(event: FormSubmitEvent<z.output<typeof schema>>) => join(event.data.username)"
 			/>
 			<UAuthForm

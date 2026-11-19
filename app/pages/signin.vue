@@ -19,8 +19,8 @@ async function onSubmit(event: FormSubmitEvent<z.output<typeof schema>>) {
 		await $fetch("/api/v1/auth/setup", { method: "POST", body: event.data });
 		await useAuthSession().refresh();
 		await navigateTo("/");
-	} catch (error: any) {
-		toast.add({ title: error.data?.statusMessage ?? "Could not set up the house.", color: "error" });
+	} catch (error) {
+		toast.add({ title: fetchErrorMessage(error) ?? "Could not set up the house.", color: "error", icon: "i-lucide-circle-alert" });
 	}
 }
 </script>
@@ -36,6 +36,7 @@ async function onSubmit(event: FormSubmitEvent<z.output<typeof schema>>) {
 				:schema="schema"
 				:fields="[{ name: 'username', type: 'text', label: 'Display name', required: true }]"
 				:submit="{ label: 'Create house' }"
+				loading-auto
 				@submit="onSubmit"
 			/>
 			<UAuthForm

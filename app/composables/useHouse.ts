@@ -42,8 +42,19 @@ export function useHouse() {
 		},
 	});
 
-	/** Sends an intent; the server validates it and broadcasts the result to everyone, sender included. */
-	const sendIntent = (msg: ClientMsg) => send(JSON.stringify(msg));
+	/**
+	 * Sends an intent; the server validates it and broadcasts the result to everyone, sender included.
+	 * Timer intents also apply locally right away, so the click lands without waiting for the round trip;
+	 * the broadcast then replaces the guess with the server's value.
+	 */
+	function sendIntent(msg: ClientMsg) {
+		send(JSON.stringify(msg));
+		if (msg.t === "timer") {
+			house.value.timer = msg.action === "start" && msg.minutes
+				? { endsAtServerMs: Date.now() + clockOffsetMs.value + msg.minutes * 60_000, minutes: msg.minutes }
+				: null;
+		}
+	}
 
 	return { house, status, clockOffsetMs, sendIntent };
 }

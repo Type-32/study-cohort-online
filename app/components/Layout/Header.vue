@@ -1,91 +1,64 @@
 <script setup lang="ts">
-import type { DropdownMenuItem, NavigationMenuItem } from "@nuxt/ui";
+import type { DropdownMenuItem } from "@nuxt/ui";
 import { useAuthSession } from "~/composables/core/useAuthSession";
-import Logo from "~/components/Logo.vue";
+
 const $as = useAuthSession();
 const $rc = useRuntimeConfig();
+const { copyLink, createLink } = useInviteLinks();
+const user = computed(() => $as.user.value);
+const signingOut = ref(false);
 
-const navigationItems = ref<NavigationMenuItem[]>([
-	{
-		label: "About",
-		to: "/about",
-	},
+const menu = computed<DropdownMenuItem[][]>(() => [
+	[{ type: "label", label: user.value?.username, avatar: { alt: user.value?.username } }],
+	[{
+		label: "Sign in on another device",
+		icon: "i-lucide-smartphone",
+		async onSelect() {
+			const invite = await createLink(user.value!.id);
+			await copyLink(invite.code, "Open it on your other device. It works once, for 7 days.");
+		},
+	}],
+	[{
+		label: "Sign out",
+		icon: "i-lucide-log-out",
+		color: "error",
+		onSelect() {
+			signingOut.value = true;
+			$as.clear();
+		},
+	}],
 ]);
-
-const userDropdownMenuItems: DropdownMenuItem[][] = [
-	[
-		{
-			label: "Dashboard",
-			icon: "i-lucide-layout-dashboard",
-			to: "/dashboard",
-		},
-	],
-	[
-		{
-			label: "Sign Out",
-			icon: "i-lucide-log-out",
-			async onSelect() {
-				await $as.clear();
-			},
-			color: "error",
-		},
-	],
-];
 </script>
 
 <template>
-	<UHeader>
-		<template #left>
-			<NuxtLink to="/" class="flex items-center justify-center gap-1.5 select-none">
-				<Logo class="h-8 w-auto shrink-0"/>
-				<span class="text-xl font-brand text-highlighted">{{$rc.public.siteName}}</span>
-			</NuxtLink>
+	<UHeader :toggle="false" to="/">
+		<template #title>
+			<UIcon name="i-lucide-lamp-desk" class="size-5 text-primary" />
+			<span class="font-brand">{{ $rc.public.siteName || "Study House" }}</span>
 		</template>
-		<UNavigationMenu
-			:items="navigationItems"
-			arrow
-			content-orientation="vertical"
-			orientation="horizontal"
-		/>
+
 		<template #right>
-			<UColorModeButton class="text-muted hover:text-highlighted" aria-label="Toggle Color Mode" />
-			<UtilityAuthState v-slot="{ loggedIn, user }">
-				<UButton v-if="!loggedIn" label="Sign In" to="/signin" />
-				<template v-else>
-					<UDropdownMenu
-						:items="[
-							[
-								{
-									label: 'Dashboard',
-									to: '/dashboard',
-									icon: 'i-lucide-layout-dashboard',
-								},
-							],
-							[
-								{
-									label: 'Sign Out',
-									icon: 'i-lucide-log-out',
-									async onSelect() {
-										await $as.clear();
-									},
-									color: 'error',
-								},
-							],
-						]"
-					>
-						<UButton
-							:avatar="{
-								src: user?.image || undefined,
-								icon: 'i-lucide-user',
-							}"
-							variant="ghost"
-							square
-						/>
-					</UDropdownMenu>
-				</template>
-			</UtilityAuthState>
+			<UColorModeButton />
+			<template v-if="user">
+				<USlideover v-if="user.role === 'admin'" title="Manage house" description="Invite people in, and get members back in on a new device.">
+					<UButton label="Manage house" icon="i-lucide-settings-2" color="neutral" variant="ghost" :ui="{ label: 'hidden sm:inline' }" />
+					<template #body>
+						<HostPanel />
+					</template>
+				</USlideover>
+
+				<UDropdownMenu :items="menu" :content="{ align: 'end' }">
+					<UButton
+						:avatar="{ alt: user.username }"
+						:label="user.username"
+						:loading="signingOut"
+						color="neutral"
+						variant="ghost"
+						trailing-icon="i-lucide-chevron-down"
+						:ui="{ label: 'hidden sm:inline' }"
+					/>
+				</UDropdownMenu>
+			</template>
 		</template>
 	</UHeader>
 </template>
-
-<style scoped></style>

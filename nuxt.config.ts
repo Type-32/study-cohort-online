@@ -69,6 +69,12 @@ export default defineNuxtConfig({
 		}
 	},
 
+	icon: {
+		// Ship every icon the source uses in the client bundle; otherwise each one is fetched
+		// from the server on first render and pops in late (menus, toasts, badges).
+		clientBundle: { scan: true },
+	},
+
 	image: {
 		domains: [],
 		provider: 'none', // or configure ipx with a custom fetchAdapter
