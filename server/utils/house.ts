@@ -18,29 +18,35 @@ const radioOf = (row: HouseRow | undefined): RadioState =>
 		: null
 
 /** Starts (`minutes`) or stops (`null`) the shared focus timer. The server never ticks; it ends on its own. */
-export async function setTimer(minutes: number | null) {
+export async function setTimer(minutes: number | null, intent?: string) {
 	const timer: TimerState = minutes ? { endsAtServerMs: Date.now() + minutes * 60_000, minutes } : null
 	const values = { timerEndsAt: timer && new Date(timer.endsAtServerMs), timerMinutes: timer?.minutes ?? null }
-	await db.insert(houseState).values({ id: 1, ...values }).onConflictDoUpdate({ target: houseState.id, set: values })
-	await publish({ t: 'timer', timer })
+	await db.transaction(async (tx) => {
+		await tx.insert(houseState).values({ id: 1, ...values }).onConflictDoUpdate({ target: houseState.id, set: values })
+		await publish({ t: 'timer', timer, intent }, { tx })
+	})
 }
 
-/** Applies a radio intent under a row lock (pause and resume read the current state) and broadcasts the result. */
-export async function applyRadio(intent: RadioIntent) {
-	const radio = await db.transaction(async (tx) => {
+/**
+ * Applies a radio intent under a row lock (pause and resume read the current state) and broadcasts
+ * the result. An intent that changes nothing (pausing a paused radio) still broadcasts, so the
+ * sender hears back about it.
+ */
+export async function applyRadio(radioIntent: RadioIntent, intent?: string) {
+	await db.transaction(async (tx) => {
 		await tx.insert(houseState).values({ id: 1 }).onConflictDoNothing()
 		const [row] = await tx.select().from(houseState).where(eq(houseState.id, 1)).for('update')
 		const current = radioOf(row)
-		const next = nextRadio(current, intent, Date.now())
-		if (next === current) return undefined
-		await tx.update(houseState).set({
-			radioVideoId: next?.videoId ?? null,
-			radioStartedAt: next && new Date(next.startedAtServerMs),
-			radioPausedAt: next?.pausedAtServerMs ? new Date(next.pausedAtServerMs) : null,
-		}).where(eq(houseState.id, 1))
-		return next
+		const next = nextRadio(current, radioIntent, Date.now())
+		if (next !== current) {
+			await tx.update(houseState).set({
+				radioVideoId: next?.videoId ?? null,
+				radioStartedAt: next && new Date(next.startedAtServerMs),
+				radioPausedAt: next?.pausedAtServerMs ? new Date(next.pausedAtServerMs) : null,
+			}).where(eq(houseState.id, 1))
+		}
+		await publish({ t: 'radio', radio: next, intent }, { tx })
 	})
-	if (radio !== undefined) await publish({ t: 'radio', radio })
 }
 
 export async function snapshot(): Promise<HouseState> {

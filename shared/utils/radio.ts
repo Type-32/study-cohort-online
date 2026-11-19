@@ -13,6 +13,12 @@ export type RadioIntent =
 	| { action: 'play'; videoId: string }
 	| { action: 'pause' | 'resume' | 'stop' }
 
+/**
+ * What a client's player shows for the house's radio. `tuning`: loading the track; `ended`: the
+ * house's position is past the end of the track; `unavailable`: YouTube refused to play it here.
+ */
+export type RadioPhase = 'tuning' | 'playing' | 'paused' | 'ended' | 'unavailable'
+
 /** Playback position in ms at server time `serverNow`. */
 export function radioPositionMs(radio: NonNullable<RadioState>, serverNow: number) {
 	return (radio.pausedAtServerMs ?? serverNow) - radio.startedAtServerMs

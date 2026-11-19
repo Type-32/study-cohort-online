@@ -15,6 +15,9 @@
         "@nuxt/ui": "^4.13.0",
         "@nuxthub/core": "0.10.12",
         "@nuxtjs/i18n": "^10.6.0",
+        "@pinia/colada": "^1.4.9",
+        "@pinia/colada-nuxt": "1.2.1",
+        "@pinia/nuxt": "1.0.3",
         "@type32/nuxt-cs-utils": "2.2.2",
         "@type32/nuxt-ui-extras": "^0.1.2",
         "@vueuse/nuxt": "15.0.0",
@@ -27,6 +30,7 @@
         "nuxt-auth-utils": "^0.6.2",
         "nuxt-authorization": "^0.3.5",
         "nuxt-security": "2.7.0",
+        "pinia": "^4.1.0",
         "postgres": "^4.1.1",
         "tailwindcss": "^4.3.5",
         "vue": "^3.5.45",
@@ -444,6 +448,12 @@
     "@parcel/watcher-wasm": ["@parcel/watcher-wasm@2.6.0", "", { "dependencies": { "is-glob": "^4.0.3", "napi-wasm": "^1.1.0", "picomatch": "^4.0.4" } }, "sha512-dtjbDxKSDPQ8AmA+pS4OFaHE1FKrjtGpLGBxw85uKFkRorjNbvDM/aFPgqosu40wprbp1xw2ZSxIKqghCUHe2w=="],
 
     "@phc/format": ["@phc/format@1.0.0", "", {}, "sha512-m7X9U6BG2+J+R1lSOdCiITLLrxm+cWlNI3HUFA92oLO77ObGNzaKdh8pMLqdZcshtkKuV84olNNXDfMc4FezBQ=="],
+
+    "@pinia/colada": ["@pinia/colada@1.4.9", "", { "dependencies": { "nostics": "^1.3.0" }, "peerDependencies": { "pinia": "^2.2.6 || ^3.0.0 || ^4.0.2", "vue": "^3.5.41" } }, "sha512-3kMNQYjSTfFmyiqfE8CTDv2giY1I76j5ZbijhFI4+rnkEBA79PLBPqUKNILACC53Py/XL8jPACeO5jWyXQn51Q=="],
+
+    "@pinia/colada-nuxt": ["@pinia/colada-nuxt@1.2.1", "", { "dependencies": { "@nuxt/kit": "^4.6.2" }, "peerDependencies": { "@pinia/colada": ">=1.4.9", "@pinia/colada-devtools": "^2.1.0" }, "optionalPeers": ["@pinia/colada-devtools"] }, "sha512-5KLb1HSbVIG+kpr5VdYzudOQPvTkFYX79hDOGzVjDk3JaKX9RyJ4E/PK3oO14R+brcHtWuINjqVyn0pQaSMU1Q=="],
+
+    "@pinia/nuxt": ["@pinia/nuxt@1.0.3", "", { "dependencies": { "@nuxt/kit": "^4.6.0" }, "peerDependencies": { "pinia": "^4.1.0" } }, "sha512-riI5CHfiQUNqFJjY+KuopkOtxSiex2CQYEHdQHiZRhS20ebtkiXQXtYbL/ecni3vhOJvW1PyVfPT7j5SzwvpLQ=="],
 
     "@pixi/colord": ["@pixi/colord@2.9.6", "", {}, "sha512-nezytU2pw587fQstUu1AsJZDVEynjskwOL+kibwcdxsMBFqPsFFNA7xl0ii/gXuDi6M0xj3mfRJj8pBSc2jCfA=="],
 
@@ -1416,6 +1426,8 @@
     "picocolors": ["picocolors@1.1.1", "", {}, "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="],
 
     "picomatch": ["picomatch@4.0.7", "", {}, "sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA=="],
+
+    "pinia": ["pinia@4.1.0", "", { "dependencies": { "nostics": "^1.2.0" }, "peerDependencies": { "@vue/devtools-api": "^8.2.1", "typescript": ">=5.6.0", "vue": "^3.5.11" }, "optionalPeers": ["typescript"] }, "sha512-+5/HMuVjYQfKlCD5xQ7zfXn1xUzYFEa7pd0DQK5SaMfZCaFRTHlaH/c02N1FoGOdlzSiwf5EOPgJx//1QDw6gw=="],
 
     "pixi-filters": ["pixi-filters@6.1.5", "", { "dependencies": { "@types/gradient-parser": "^0.1.2" }, "peerDependencies": { "pixi.js": ">=8.0.0-0" } }, "sha512-Ewb/J+kxAbaNN+0/ATJbglAJG+skGJfh7BIDP3ILIDdD6wWk1p0pGa25pVf1T8hGBOQSUNVAmwwJBwkj+cyLLA=="],
 

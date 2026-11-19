@@ -35,7 +35,7 @@ const user = computed(() => $as.user.value);
 const signingOut = ref(false);
 
 // Live status, written by the home page.
-const { house, clockOffsetMs } = useHouseState();
+const { house, clockOffsetMs } = storeToRefs(useHouseStore());
 const offscreen = useState("house:offscreen", () => ({ timer: false, members: false }));
 const { running, countdown, phase } = useTimerView(computed(() => house.value.timer), clockOffsetMs);
 

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { parseYouTubeId, radioPositionMs } from "#shared/utils/radio";
-import type { RadioIntent, RadioState } from "#shared/utils/radio";
-import type { Door } from "#shared/utils/realtime";
+import type { RadioPhase } from "#shared/utils/radio";
 
-const props = defineProps<{ radio: RadioState; clockOffsetMs: number; door: Door }>();
-const emit = defineEmits<{ intent: [intent: RadioIntent]; settled: [] }>();
+const emit = defineEmits<{ settled: [] }>();
+
+const { house, clockOffsetMs, loaded, myDoor: door } = storeToRefs(useHouseStore());
+const radio = computed(() => house.value.radio);
+const { mutate: sendIntent, isLoading: sending } = useHouseIntent();
 
 const link = ref("");
 const videoId = computed(() => parseYouTubeId(link.value));
@@ -16,32 +18,47 @@ const muted = useLocalStorage("house:radio-muted", false, { initOnMounted: true 
 
 // Your door sets how much of the commons you hear: all of it, a quarter through an ajar door, none
 // through a closed one. The player keeps playing in sync either way, so opening the door is instant.
-const doorVolume = computed(() => Math.round(volume.value * (props.door === "ajar" ? 0.25 : 1)));
-const doorMuted = computed(() => muted.value || props.door === "closed");
+const doorVolume = computed(() => Math.round(volume.value * (door.value === "ajar" ? 0.25 : 1)));
+const doorMuted = computed(() => muted.value || door.value === "closed");
 const doorHint = computed(() =>
-	props.door === "ajar" ? "Your door is ajar, so the radio is faint." : props.door === "closed" ? "Your door is closed, so you can't hear the radio." : undefined,
+	door.value === "ajar" ? "Your door is ajar, so the radio is faint." : door.value === "closed" ? "Your door is closed, so you can't hear the radio." : undefined,
 );
 
-const paused = computed(() => props.radio?.pausedAtServerMs != null);
+const paused = computed(() => radio.value?.pausedAtServerMs != null);
 
-watch(() => props.radio?.videoId, () => (title.value = undefined));
+watch(() => radio.value?.videoId, () => {
+	title.value = undefined;
+	phase.value = "tuning";
+});
 
-/** The player is still loading the track; shared controls wait until it shows the real state. */
-const playerLoading = ref(true);
-watch(playerLoading, (loading) => !loading && emit("settled"));
-const status = computed(() => (!props.radio ? "Off" : playerLoading.value ? "Tuning in" : paused.value ? "Paused" : "On air"));
+/** What the player shows. `tuning` until it shows the house's real state; shared controls wait for it. */
+const phase = ref<RadioPhase>("tuning");
+const tuning = computed(() => !!radio.value && phase.value === "tuning");
+watch(tuning, (now) => !now && emit("settled"));
+const status = computed(() => {
+	if (!loaded.value) return "Connecting";
+	if (!radio.value) return "Off";
+	return { tuning: "Tuning in", playing: "On air", paused: "Paused", ended: "Track over", unavailable: "Can't play" }[phase.value];
+});
+const heading = computed(() => {
+	if (!loaded.value) return "…";
+	if (!radio.value) return "Nothing on";
+	if (title.value) return title.value;
+	return phase.value === "tuning" ? "Tuning in…" : phase.value === "unavailable" ? "Can't play this one" : "Untitled track";
+});
+const onAir = computed(() => !!radio.value && phase.value === "playing");
 
 function play() {
 	if (!videoId.value) return;
-	emit("intent", { action: "play", videoId: videoId.value });
+	sendIntent({ t: "radio", action: "play", videoId: videoId.value });
 	link.value = "";
 }
 
 /** Opens the track on YouTube at the house's current position. */
 function openOnYouTube() {
-	if (!props.radio) return;
-	const seconds = Math.floor(radioPositionMs(props.radio, Date.now() + props.clockOffsetMs) / 1000);
-	window.open(`https://www.youtube.com/watch?v=${props.radio.videoId}&t=${seconds}s`, "_blank", "noopener");
+	if (!radio.value) return;
+	const seconds = Math.floor(radioPositionMs(radio.value, Date.now() + clockOffsetMs.value) / 1000);
+	window.open(`https://www.youtube.com/watch?v=${radio.value.videoId}&t=${seconds}s`, "_blank", "noopener");
 }
 </script>
 
@@ -49,26 +66,25 @@ function openOnYouTube() {
 	<section id="house-radio" class="flex scroll-mt-24 flex-col gap-4" aria-labelledby="radio-title">
 		<div class="flex items-center gap-2 text-xs tracking-widest text-muted uppercase">
 			<span class="relative flex size-2">
-				<span v-if="radio && !paused" class="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-60" />
-				<span class="relative inline-flex size-2 rounded-full" :class="radio && !paused ? 'bg-primary' : 'bg-(--ui-text-dimmed)'" />
+				<span v-if="onAir" class="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-60" />
+				<span class="relative inline-flex size-2 rounded-full" :class="onAir ? 'bg-primary' : 'bg-(--ui-text-dimmed)'" />
 			</span>
 			Radio · {{ status }}
 		</div>
 
-		<AnimatePresence mode="wait">
-			<Motion
-				:key="title ?? 'untitled'"
-				as="h2"
-				id="radio-title"
-				class="font-serif text-2xl text-highlighted text-balance"
-				:initial="{ opacity: 0, y: 6 }"
-				:animate="{ opacity: 1, y: 0 }"
-				:exit="{ opacity: 0, y: -6 }"
-				:transition="{ duration: 0.25 }"
-			>
-				{{ title ?? (radio ? "Tuning in…" : "Nothing on") }}
-			</Motion>
-		</AnimatePresence>
+		<!-- Swapped, not cross-faded: the heading can change several times in a second while a track
+		     loads, and an exit animation would leave a stale line ("Nothing on") showing meanwhile. -->
+		<Motion
+			:key="heading"
+			as="h2"
+			id="radio-title"
+			class="font-serif text-2xl text-highlighted text-balance"
+			:initial="{ opacity: 0, y: 6 }"
+			:animate="{ opacity: 1, y: 0 }"
+			:transition="{ duration: 0.25 }"
+		>
+			{{ heading }}
+		</Motion>
 
 		<AnimatePresence>
 			<Motion
@@ -85,7 +101,7 @@ function openOnYouTube() {
 						:clock-offset-ms="clockOffsetMs"
 						:volume="doorVolume"
 						:muted="doorMuted"
-						v-model:loading="playerLoading"
+						v-model:phase="phase"
 						@title="title = $event"
 					/>
 					<template #fallback>
@@ -96,21 +112,21 @@ function openOnYouTube() {
 		</AnimatePresence>
 
 		<div v-if="radio" class="flex items-center gap-1">
-			<UTooltip :text="paused ? 'Resume for everyone' : 'Pause for everyone'">
+			<UTooltip v-if="phase !== 'ended'" :text="paused ? 'Resume for everyone' : 'Pause for everyone'">
 				<UButton
 					:icon="paused ? 'i-pixelarticons-play' : 'i-pixelarticons-pause'"
 					:aria-label="paused ? 'Resume' : 'Pause'"
 					color="neutral"
 					variant="ghost"
-					:disabled="playerLoading"
-					@click="emit('intent', { action: paused ? 'resume' : 'pause' })"
+					:disabled="tuning"
+					@click="sendIntent({ t: 'radio', action: paused ? 'resume' : 'pause' })"
 				/>
 			</UTooltip>
 			<UTooltip text="Turn off for everyone">
-				<UButton icon="i-pixelarticons-stop" aria-label="Turn off" color="neutral" variant="ghost" :disabled="playerLoading" @click="emit('intent', { action: 'stop' })" />
+				<UButton icon="i-pixelarticons-stop" aria-label="Turn off" color="neutral" variant="ghost" :disabled="tuning" @click="sendIntent({ t: 'radio', action: 'stop' })" />
 			</UTooltip>
 			<UTooltip text="Open on YouTube at this moment">
-				<UButton icon="i-pixelarticons-external-link" aria-label="Open on YouTube" color="neutral" variant="ghost" :disabled="playerLoading" @click="openOnYouTube" />
+				<UButton icon="i-pixelarticons-external-link" aria-label="Open on YouTube" color="neutral" variant="ghost" :disabled="tuning" @click="openOnYouTube" />
 			</UTooltip>
 
 			<div class="ml-auto flex w-40 items-center gap-2">
@@ -158,7 +174,7 @@ function openOnYouTube() {
 			>
 				<template #trailing>
 					<UTooltip :text="link && !videoId ? 'That doesn\'t look like a YouTube link' : 'Play for everyone'">
-						<UButton type="submit" icon="i-pixelarticons-play" aria-label="Play for everyone" size="sm" variant="ghost" :disabled="!videoId" />
+						<UButton type="submit" icon="i-pixelarticons-play" aria-label="Play for everyone" size="sm" variant="ghost" :disabled="!videoId" :loading="sending" />
 					</UTooltip>
 				</template>
 			</UInput>

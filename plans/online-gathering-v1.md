@@ -134,7 +134,7 @@ Known ceiling: an instance killed without running `close` leaves its members on 
 
 **Client**
 
-- `app/composables/useHouse.ts`: VueUse `useWebSocket` with exponential backoff (1s doubling to 30s), a JSON ping as the heartbeat (10s pong timeout), an immediate ping on connect for the clock offset (`serverMs - (clientMs + roundTrip / 2)`), and a reactive `HouseState`. One socket per call: call it once per page.
+- `app/composables/useHouse.ts`: VueUse `useWebSocket` with exponential backoff (1s doubling to 30s), a JSON ping as the heartbeat (10s pong timeout), an immediate ping on connect for the clock offset (`serverMs - (clientMs + roundTrip / 2)`), and a reactive `HouseState`. One socket per call: call it once per page. (Replaced Nov 19 by the `house` Pinia store; see "Intents and optimistic UI" under step 5.)
 - `/` shows "In the house" with a badge per present member, and "Connecting…" while the socket is down.
 
 Verified against a throwaway Postgres 18, in `nuxt dev` and in a `vercel`-preset build under the launcher harness (13 checks each): snapshot contents, join and leave broadcasts, two tabs then one closing (no `leave`), last tab closing (`leave`), ping/pong and `lastSeenAt`, garbage messages ignored, stale rows excluded, banned and signed-out sockets refused, rows removed on close. In a browser: a second member appearing and leaving live, "Connecting…" while the server was down, and the list restored after it came back.
@@ -181,6 +181,19 @@ Browsers discard (Chrome Memory Saver, Edge sleeping tabs) or freeze background 
 - `app/components/DoorSwitch.vue`: Open / Ajar / Closed, each with a tooltip saying what it means.
 
 Verified against a throwaway Postgres 18 in `nuxt dev`: 9 protocol checks (default open, joins carry the door, closing reaches others without a `leave`, invalid door ignored, remembered across a reconnect and in the rejoin broadcast, ajar, snapshot shows every door). In a browser: open 60 → ajar 15 → closed muted (still playing) → open 60; the member list and hint follow each switch; the door was remembered across a reload.
+
+### Intents and optimistic UI (Nov 19)
+
+Clicks looked jumpy: the optimistic copy was written into the same state that broadcasts and snapshots overwrite, so anything arriving in between (most visibly, the broadcast of an earlier quick click) could flip a control back for a moment. A reconnect also reshuffled the member list (snapshot order) and could report your own `leave` after your rejoin.
+
+- `app/stores/house.ts` (Pinia setup store) owns the socket and keeps the server's state (`confirmed`) separate from this member's unanswered intents (`pending`). Components read `house`, which is `confirmed` with the pending intents applied on top, so nothing arriving in between can undo a click. Members are sorted by name. The home page calls `connect()` on mount and `disconnect()` on unmount; the header only reads.
+- Every intent carries an `id`. The broadcast it causes carries the id back as `intent`, and the store drops the intent in the same tick it applies the broadcast. Errors carry the id too, and the intent is dropped as failed. With no answer after 10s, the intent is given up.
+- `useHouseIntent()` wraps the store's `sendIntent` in a Pinia Colada `useMutation`: `isLoading` until the house answers (the radio's Play button shows it), plus a toast on failure.
+- Server: each socket's messages run one after another (a promise chain per peer), and each change is published inside its own transaction, so notifications arrive in commit order. Together these mean the second of two quick clicks wins, and they come back in the order they were sent. A radio intent that changes nothing still broadcasts, so the sender gets an answer.
+- `leave` is checked and sent in one statement (`pg_notify … where not exists (fresh connection)`), so it can't land after the same member's rejoin. The client also ignores a `leave` for itself while its socket is open.
+- Radio phases (`RadioPhase`): `tuning`, `playing`, `paused`, `ended` (the house's position is past the end of the track) and `unavailable` (YouTube refused it). "Tuning in" now means only that the track is loading. A finished track shows "Track over" and is covered with a prompt to put on the next one. The player checks the position as soon as playback starts, so a finished track never plays out loud first.
+
+Verified against a throwaway Postgres: 9 protocol checks (intent ids come back on door, timer and radio broadcasts; five rapid door intents come back in order and the last one wins; a no-op radio intent answers; a reconnect never ends with `leave`; a real leave is still sent). In a browser: five door clicks 40 ms apart pressed exactly Open → Ajar → Closed → Open → Ajar → Closed with no bounce. A dropped socket left the door and member list unchanged; only the member count hid while reconnecting. A track that ended two hours ago went Connecting → Tuning in → Track over, never On air. Turning the radio off showed Off / Nothing on, and Play went Tuning in… → title → On air.
 
 ## Step 6: canvas and theme packs
 

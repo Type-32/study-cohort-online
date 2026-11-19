@@ -1,17 +1,16 @@
 <script setup lang="ts">
-import type { TimerState } from "#shared/utils/realtime";
-
-const props = defineProps<{ timer: TimerState; clockOffsetMs: number }>();
-const emit = defineEmits<{ start: [minutes: number]; stop: [] }>();
+const { house, clockOffsetMs } = storeToRefs(useHouseStore());
+const timer = computed(() => house.value.timer);
+const { mutate: sendIntent } = useHouseIntent();
 
 // The length you last picked; read after mount so server and client renders agree.
 const minutes = useLocalStorage("house:focus-minutes", 25, { initOnMounted: true });
 
-const { running, totalMs, elapsedMs, countdown, phase } = useTimerView(toRef(props, "timer"), toRef(props, "clockOffsetMs"));
+const { running, totalMs, elapsedMs, countdown, phase } = useTimerView(timer, clockOffsetMs);
 const display = computed(() => (running.value ? countdown.value : formatClock((minutes.value ?? 25) * 60)));
 
 function start() {
-	if (minutes.value) emit("start", minutes.value);
+	if (minutes.value) sendIntent({ t: "timer", action: "start", minutes: minutes.value });
 }
 </script>
 
@@ -61,7 +60,7 @@ function start() {
 				:transition="{ duration: 0.15 }"
 			>
 				<UTooltip text="Stops the timer for everyone">
-					<UButton label="Stop" icon="i-pixelarticons-stop" color="neutral" variant="ghost" @click="emit('stop')" />
+					<UButton label="Stop" icon="i-pixelarticons-stop" color="neutral" variant="ghost" @click="sendIntent({ t: 'timer', action: 'stop' })" />
 				</UTooltip>
 			</Motion>
 			<Motion
@@ -81,7 +80,7 @@ function start() {
 					<UButton type="submit" label="Start focus" icon="i-pixelarticons-play" variant="soft" :disabled="!minutes" />
 				</UTooltip>
 				<UTooltip v-if="timer" text="Ends the break for everyone">
-					<UButton label="Clear" color="neutral" variant="ghost" @click="emit('stop')" />
+					<UButton label="Clear" color="neutral" variant="ghost" @click="sendIntent({ t: 'timer', action: 'stop' })" />
 				</UTooltip>
 			</Motion>
 		</AnimatePresence>

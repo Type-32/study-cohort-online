@@ -2,8 +2,8 @@
 import type { Door } from "#shared/utils/realtime";
 
 /** Your door: how far you sit from the commons. Changing it is never announced to the others. */
-defineProps<{ door: Door }>();
-const emit = defineEmits<{ change: [door: Door] }>();
+const { myDoor: door } = storeToRefs(useHouseStore());
+const { mutate: sendIntent } = useHouseIntent();
 
 const options: { door: Door; label: string; icon: string; tip: string }[] = [
 	{ door: "open", label: "Open", icon: "i-pixelarticons-login", tip: "At your desk in the living room. You hear the radio." },
@@ -23,7 +23,7 @@ const options: { door: Door; label: string; icon: string; tip: string }[] = [
 					:color="door === option.door ? 'primary' : 'neutral'"
 					:variant="door === option.door ? 'soft' : 'ghost'"
 					:aria-pressed="door === option.door"
-					@click="door !== option.door && emit('change', option.door)"
+					@click="door !== option.door && sendIntent({ t: 'door', state: option.door })"
 				/>
 			</UTooltip>
 		</UFieldGroup>

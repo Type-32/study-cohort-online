@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /// <reference types="youtube" />
 import { radioPositionMs } from "#shared/utils/radio";
-import type { RadioState } from "#shared/utils/radio";
+import type { RadioPhase, RadioState } from "#shared/utils/radio";
 
 /**
  * The YouTube player for the shared radio. Client only. Each client plays locally and steers
@@ -10,12 +10,12 @@ import type { RadioState } from "#shared/utils/radio";
 const props = defineProps<{ radio: NonNullable<RadioState>; clockOffsetMs: number; volume: number; muted: boolean }>();
 const emit = defineEmits<{ title: [title: string] }>();
 /**
- * True until the player first shows the house's real state for the current video: playing, or
- * paused/cued when the house is paused, or the muted fallback, or an error. While true the video
- * is covered, so YouTube's paused-looking thumbnail doesn't invite a click on a radio that is
- * about to start by itself.
+ * What the player shows. `tuning` until it first shows the house's real state for the current
+ * video: playing, or paused/cued when the house is paused, or past the end, or an error. While
+ * tuning the video is covered, so YouTube's paused-looking thumbnail doesn't invite a click on a
+ * radio that is about to start by itself.
  */
-const loading = defineModel<boolean>("loading", { default: true });
+const phase = defineModel<RadioPhase>("phase", { default: "tuning" });
 
 const el = useTemplateRef<HTMLDivElement>("el");
 let player: YT.Player | undefined;
@@ -27,8 +27,7 @@ let playRequestedAt: number | undefined;
 const autoMuted = ref(false);
 /** Why YouTube refused the current video, if it did. Cleared when the house picks another one. */
 const error = ref<string>();
-watch(autoMuted, (on) => on && (loading.value = false));
-watch(error, (message) => message && (loading.value = false));
+watch(error, (message) => message && (phase.value = "unavailable"));
 
 const targetSeconds = () => radioPositionMs(props.radio, Date.now() + props.clockOffsetMs) / 1000;
 
@@ -40,7 +39,7 @@ function sync() {
 	if (loadedId !== radio.videoId) {
 		loadedId = radio.videoId;
 		error.value = undefined;
-		loading.value = true;
+		phase.value = "tuning";
 		const args = { videoId: radio.videoId, startSeconds: targetSeconds() };
 		if (paused) player.cueVideoById(args);
 		else player.loadVideoById(args);
@@ -48,14 +47,15 @@ function sync() {
 	}
 	if (error.value) return;
 
-	const { PLAYING, BUFFERING, PAUSED } = YT.PlayerState;
+	const { PLAYING, BUFFERING, PAUSED, ENDED } = YT.PlayerState;
 	const state = player.getPlayerState();
 	const data = player.getVideoData();
 	// `isLive` is undocumented; live streams have no shared position, everyone sits at the live edge.
 	const live = "isLive" in data && data.isLive === true;
 	const duration = player.getDuration();
 	const target = targetSeconds();
-	const ended = !live && duration > 0 && target >= duration;
+	// A player that just finished may be a moment ahead of the house; don't replay the last seconds.
+	const ended = !live && duration > 0 && target >= duration - (state === ENDED ? 3 : 0);
 
 	// seekTo starts playback from cued/unstarted states, so only correct drift on a started video.
 	const started = state === PLAYING || state === BUFFERING || state === PAUSED;
@@ -64,6 +64,7 @@ function sync() {
 	if (paused || ended) {
 		if (state === PLAYING || state === BUFFERING) player.pauseVideo();
 		playRequestedAt = undefined;
+		if (ended) phase.value = "ended";
 		return;
 	}
 	if (state === PLAYING || state === BUFFERING) {
@@ -114,14 +115,19 @@ onMounted(async () => {
 				sync();
 			},
 			onStateChange(event) {
-				const { PLAYING, PAUSED, CUED } = yt.PlayerState;
+				const { PLAYING, PAUSED, CUED, ENDED } = yt.PlayerState;
 				const housePaused = props.radio.pausedAtServerMs !== null;
-				if (event.data === PLAYING || (housePaused && (event.data === PAUSED || event.data === CUED))) loading.value = false;
+				if (event.data === PLAYING) phase.value = "playing";
+				else if (housePaused && (event.data === PAUSED || event.data === CUED)) phase.value = "paused";
+				else if (event.data === ENDED) phase.value = "ended";
 				if (event.data === PLAYING) {
 					playRequestedAt = undefined;
-					const title = player?.getVideoData().title;
-					if (title) emit("title", title);
+					// Right away rather than on the next tick: a track that's already over (or far off the
+					// house's position) shouldn't play out loud for up to 2 seconds first.
+					sync();
 				}
+				const title = player?.getVideoData().title;
+				if (title) emit("title", title);
 			},
 			onError(event) {
 				// 101 and 150: the owner disabled embedding. 100: removed or private. 2, 5: bad id or player error.
@@ -149,16 +155,23 @@ onBeforeUnmount(() => player?.destroy());
 			<div ref="el" class="size-full" />
 			<AnimatePresence>
 				<Motion
-					v-if="loading"
-					key="loading"
-					class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black text-sm text-white/70"
+					v-if="phase === 'tuning' || phase === 'ended'"
+					:key="phase"
+					class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black p-6 text-center text-sm text-white/70"
 					role="status"
-					:initial="{ opacity: 1 }"
+					:initial="{ opacity: phase === 'tuning' ? 1 : 0 }"
+					:animate="{ opacity: 1 }"
 					:exit="{ opacity: 0 }"
 					:transition="{ duration: 0.4 }"
 				>
-					<UIcon name="i-pixelarticons-loader" class="size-6 animate-spin" />
-					Tuning in…
+					<template v-if="phase === 'tuning'">
+						<UIcon name="i-pixelarticons-loader" class="size-6 animate-spin" />
+						Tuning in…
+					</template>
+					<template v-else>
+						<UIcon name="i-pixelarticons-music" class="size-6" />
+						That track is over. Paste a link below to put on the next one.
+					</template>
 				</Motion>
 			</AnimatePresence>
 		</div>
