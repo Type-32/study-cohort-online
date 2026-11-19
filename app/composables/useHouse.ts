@@ -3,13 +3,26 @@ import type { ClientMsg, HouseState, ServerMsg } from "#shared/utils/realtime";
 import { nextRadio } from "#shared/utils/radio";
 
 /**
- * Live house state over /api/ws. Opens one socket per call, so call it once (in the page)
- * and pass state down. Reconnects with backoff; every connect starts from a fresh snapshot.
+ * The live house state, readable anywhere (the header dock shows the timer and members from it).
+ * Only `useHouse` writes it.
+ */
+export function useHouseState() {
+	return {
+		house: useState<HouseState>("house", () => ({ members: [], timer: null, radio: null })),
+		/** serverMs - clientMs, from the last ping/pong. Add to Date.now() to get server time. */
+		clockOffsetMs: useState("house:clock-offset", () => 0),
+	};
+}
+
+/**
+ * Live house state over /api/ws. Opens one socket per call, so call it once (in the page);
+ * other components read the state through `useHouseState`. Reconnects with backoff; every
+ * connect starts from a fresh snapshot.
  */
 export function useHouse() {
-	const house = ref<HouseState>({ members: [], timer: null, radio: null });
-	/** serverMs - clientMs, from the last ping/pong. Add to Date.now() to get server time. */
-	const clockOffsetMs = ref(0);
+	const { house, clockOffsetMs } = useHouseState();
+	/** True once this page has received its first snapshot. */
+	const loaded = ref(false);
 	const toast = useToast();
 
 	const ping = () => JSON.stringify({ t: "ping", clientMs: Date.now() });
@@ -25,6 +38,7 @@ export function useHouse() {
 			switch (msg.t) {
 				case "snapshot":
 					house.value = msg.house;
+					loaded.value = true;
 					break;
 				case "member":
 					house.value.members = [...house.value.members.filter((m) => m.userId !== msg.member.userId), msg.member];
@@ -67,5 +81,5 @@ export function useHouse() {
 		}
 	}
 
-	return { house, status, clockOffsetMs, sendIntent };
+	return { house, status, clockOffsetMs, loaded, sendIntent };
 }
