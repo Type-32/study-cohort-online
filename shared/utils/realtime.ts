@@ -44,3 +44,5 @@ export type ServerMsg =
 	| { t: 'pong'; clientMs: number; serverMs: number }
 	| { t: 'timer'; timer: TimerState }
 	| { t: 'radio'; radio: RadioState }
+	/** Something the sender asked for failed; a fresh snapshot follows when there is one. */
+	| { t: 'error'; message: string }

@@ -2,16 +2,8 @@
 @import "@nuxt/ui";
 
 @theme {
-	--font-sans: 'DM Sans', sans-serif;
-	--font-serif: 'Source Serif 4', serif;
+	--font-sans: 'Figtree', 'DM Sans', sans-serif;
 	--font-mono: 'JetBrains Mono', monospace;
-}
-
-/* until v5 ships --ui-font-heading */
-@layer base {
-	h1, h2, h3, h4, h5, h6 {
-		font-family: var(--font-serif);
-	}
 }
 
 :root {

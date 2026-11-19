@@ -27,7 +27,7 @@ async function onSubmit(event: FormSubmitEvent<z.output<typeof schema>>) {
 
 <template>
 	<UMain class="flex flex-col items-center justify-center gap-4 p-4">
-		<UPageCard class="w-full max-w-md">
+		<Motion class="w-full max-w-sm" :initial="{ opacity: 0, y: 12 }" :animate="{ opacity: 1, y: 0 }" :transition="{ duration: 0.4 }">
 			<UAuthForm
 				v-if="setup?.needed"
 				title="Set up this house"
@@ -45,6 +45,6 @@ async function onSubmit(event: FormSubmitEvent<z.output<typeof schema>>) {
 				description="Ask the host for an invite link. If you've been here before on another device, ask for a re-entry link."
 				icon="i-pixelarticons-door-closed"
 			/>
-		</UPageCard>
+		</Motion>
 	</UMain>
 </template>

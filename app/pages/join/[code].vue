@@ -29,7 +29,7 @@ async function join(username?: string) {
 
 <template>
 	<UMain class="flex flex-col items-center justify-center gap-4 p-4">
-		<UPageCard class="w-full max-w-md">
+		<Motion class="w-full max-w-sm" :initial="{ opacity: 0, y: 12 }" :animate="{ opacity: 1, y: 0 }" :transition="{ duration: 0.4 }">
 			<!-- UAuthForm renders no form or submit button without fields, so re-entry gets its own button. -->
 			<UAuthForm
 				v-if="invite?.kind === 'reentry'"
@@ -58,6 +58,6 @@ async function join(username?: string) {
 				description="It may be used up, expired, or revoked. Ask the host for a new one."
 				icon="i-pixelarticons-door-closed"
 			/>
-		</UPageCard>
+		</Motion>
 	</UMain>
 </template>
