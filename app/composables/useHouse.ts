@@ -10,6 +10,7 @@ export function useHouse() {
 	const house = ref<HouseState>({ members: [], timer: null, radio: null });
 	/** serverMs - clientMs, from the last ping/pong. Add to Date.now() to get server time. */
 	const clockOffsetMs = ref(0);
+	const toast = useToast();
 
 	const ping = () => JSON.stringify({ t: "ping", clientMs: Date.now() });
 	const url = import.meta.client ? `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/ws` : undefined;
@@ -41,6 +42,9 @@ export function useHouse() {
 					break;
 				case "radio":
 					house.value.radio = msg.radio;
+					break;
+				case "error":
+					toast.add({ title: msg.message, color: "error", icon: "i-pixelarticons-alert" });
 					break;
 			}
 		},
