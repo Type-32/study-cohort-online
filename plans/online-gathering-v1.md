@@ -149,15 +149,23 @@ Verified against a throwaway Postgres 18, in `nuxt dev` and in a `vercel`-preset
 
 Verified against a throwaway Postgres 18 in `nuxt dev`: 8 protocol checks (null before first start, start reaches every socket with the same `endsAt`, late joiner's snapshot matches, invalid intents ignored, stop broadcasts null, restart after stop). In a browser: two tabs, the second opened mid-countdown, within 1s of each other (each ticks on its own second boundary); Stop in one tab and Start in the other propagate; a countdown reaching zero switches to "Break".
 
-## Step 4: radio sync
+## Step 4: radio sync (done Nov 19)
 
-- `house_state.radio`: `{ videoId, startedAtServerMs, pausedAtMs | null } | null`.
-- `ClientMsg`: `{ t: 'radio'; action: 'play' | 'pause' | 'skip'; videoId?: string }`. `ServerMsg`: `{ t: 'radio'; radio }`.
-- One YouTube IFrame player, at least 200 by 200 px and on screen. The client calls `seekTo` only when drift passes about two seconds.
-- CSP in `nuxt.config.ts`: allow the YouTube iframe (`frame-src`) and its API script (`script-src`).
-- Playlist table and "add a track" come here if the two-week test needs more than pasting a link.
+- `house_state` gains `radioVideoId`, `radioStartedAt`, `radioPausedAt` (migration `0003_radio`). State: `{ videoId, startedAtServerMs, pausedAtServerMs | null } | null`; position = `(pausedAt ?? serverNow) - startedAt`.
+- `ClientMsg`: `{ t: 'radio'; action: 'play'; videoId }` or `{ t: 'radio'; action: 'pause' | 'resume' | 'stop' }`. Changed from the plan: `skip` is dropped (nothing to skip to without a playlist), `resume` and `stop` are added. `ServerMsg`: `{ t: 'radio'; radio }`; the snapshot carries `radio`.
+- `shared/utils/radio.ts`: `nextRadio()` applies an intent; the server runs it under `SELECT … FOR UPDATE` and skips the broadcast when nothing changed, the client runs it for the optimistic update. `parseYouTubeId()` takes watch, youtu.be, shorts, live, embed and music links or a bare id; the server only accepts a validated 11-character id. Unit tests: `bun run test` (`tests/radio.test.ts`).
+- `app/components/RadioPlayer.vue`: one YouTube IFrame player (`youtube-nocookie.com`, no controls, ≥200 px, always visible). Every 2s and on each state change it seeks only past 2s of drift, plays or pauses to match, and leaves ended videos alone. Live streams (`getVideoData().isLive`, undocumented) skip seeking.
+- Autoplay: a page with no click yet cannot start with sound. After 3s stalled without sticky activation the player plays muted to stay in sync and shows "Tap to listen".
+- Unplayable videos (embedding disabled, removed, private) show an error to everyone until someone plays another link.
+- `app/components/HouseRadio.vue`: paste-a-link form, Pause/Resume and Turn off (shared), volume slider and mute (per browser, localStorage).
+- CSP needed no change: `nuxt-security` sets no `frame-src` or `default-src`, its `script-src` uses `strict-dynamic`, and COEP is already off. No violations were reported in the browser.
+- Playlist and "add a track" still deferred until the two-week test asks for it.
 
-Check: a late joiner starts within two seconds of the others; pause and resume stay aligned.
+Verified against a throwaway Postgres 18 in `nuxt dev`: 10 protocol checks (play reaches others, pause freezes the position, a late joiner gets the paused state, resume keeps the position, no-op and invalid intents broadcast nothing, three concurrent pauses produce one broadcast, new track, stop, snapshot after stop). In a browser with two tabs: a tab joining 5s in was 0.37s from the first; after two pause/resume rounds from different tabs, drift was 0.05s and 0.08s; the tab with no click played muted and offered "Tap to listen"; an embedding-disabled video showed the error in both tabs and the next link recovered both; Turn off removed the player in both. The live-stream branch is untested: the test live stream refuses embedding (error 150).
+
+### Keeping the tab awake (Nov 19)
+
+Browsers discard (Chrome Memory Saver, Edge sleeping tabs) or freeze background tabs, which drops the member out of the house and stops the radio. Tabs playing audio are exempt, so `app/composables/useKeepAwake.ts` plays a 20 Hz tone at -60 dBFS: above Chromium's audibility threshold, inaudible in practice. It starts on the first click or key press (autoplay rules) and is on by default; the "Keep this tab awake" switch on the home page turns it off (localStorage). A Chromium tab restored after a discard with the switch off shows a toast pointing at the switch. Verified: the switch creates a running `AudioContext` and persists. Not verified: that browsers count the tone as audible (the tab's speaker icon or `chrome://discards` shows it).
 
 ## Step 5: doors and nooks
 

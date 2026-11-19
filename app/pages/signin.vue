@@ -20,7 +20,7 @@ async function onSubmit(event: FormSubmitEvent<z.output<typeof schema>>) {
 		await useAuthSession().refresh();
 		await navigateTo("/");
 	} catch (error) {
-		toast.add({ title: fetchErrorMessage(error) ?? "Could not set up the house.", color: "error", icon: "i-lucide-circle-alert" });
+		toast.add({ title: fetchErrorMessage(error) ?? "Could not set up the house.", color: "error", icon: "i-pixelarticons-alert" });
 	}
 }
 </script>
@@ -32,7 +32,7 @@ async function onSubmit(event: FormSubmitEvent<z.output<typeof schema>>) {
 				v-if="setup?.needed"
 				title="Set up this house"
 				description="You're the first one here, so you'll be the host."
-				icon="i-lucide-house"
+				icon="i-pixelarticons-home"
 				:schema="schema"
 				:fields="[{ name: 'username', type: 'text', label: 'Display name', required: true }]"
 				:submit="{ label: 'Create house' }"
@@ -43,7 +43,7 @@ async function onSubmit(event: FormSubmitEvent<z.output<typeof schema>>) {
 				v-else
 				title="This house is invite-only"
 				description="Ask the host for an invite link. If you've been here before on another device, ask for a re-entry link."
-				icon="i-lucide-door-closed"
+				icon="i-pixelarticons-door-closed"
 			/>
 		</UPageCard>
 	</UMain>

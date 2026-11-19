@@ -10,6 +10,7 @@ const { house, status, clockOffsetMs, sendIntent } = useHouse();
 const connected = computed(() => status.value === "OPEN");
 const now = useNow({ interval: 1000 });
 const focusing = computed(() => !!house.value.timer && house.value.timer.endsAtServerMs > now.value.getTime() + clockOffsetMs.value);
+const { enabled: keepAwake } = useKeepAwake();
 </script>
 
 <template>
@@ -22,6 +23,12 @@ const focusing = computed(() => !!house.value.timer && house.value.timer.endsAtS
 				@stop="sendIntent({ t: 'timer', action: 'stop' })"
 			/>
 
+			<HouseRadio
+				:radio="house.radio"
+				:clock-offset-ms="clockOffsetMs"
+				@intent="(intent) => sendIntent({ t: 'radio', ...intent })"
+			/>
+
 			<section class="flex flex-col gap-4" aria-labelledby="in-the-house">
 				<div class="flex items-center gap-2">
 					<h2 id="in-the-house" class="text-lg font-semibold text-highlighted">In the house</h2>
@@ -29,7 +36,7 @@ const focusing = computed(() => !!house.value.timer && house.value.timer.endsAtS
 					<UBadge
 						v-else
 						label="Connecting"
-						icon="i-lucide-loader-circle"
+						icon="i-pixelarticons-loader"
 						color="warning"
 						variant="subtle"
 						size="sm"
@@ -51,6 +58,14 @@ const focusing = computed(() => !!house.value.timer && house.value.timer.endsAtS
 					</li>
 				</ul>
 			</section>
+
+			<USwitch
+				v-model="keepAwake"
+				label="Keep this tab awake"
+				:description="keepAwake
+					? 'Your browser won\'t put this tab to sleep, so you stay in the house and the radio keeps playing in the background.'
+					: 'Saves a little battery, but your browser may put this tab to sleep: you\'ll drop out of the house and the radio will pause until you come back.'"
+			/>
 		</UContainer>
 	</UMain>
 </template>

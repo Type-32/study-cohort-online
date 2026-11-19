@@ -12,7 +12,7 @@ const menu = computed<DropdownMenuItem[][]>(() => [
 	[{ type: "label", label: user.value?.username, avatar: { alt: user.value?.username } }],
 	[{
 		label: "Sign in on another device",
-		icon: "i-lucide-smartphone",
+		icon: "i-pixelarticons-smartphone",
 		async onSelect() {
 			const invite = await createLink(user.value!.id);
 			await copyLink(invite.code, "Open it on your other device. It works once, for 7 days.");
@@ -20,7 +20,7 @@ const menu = computed<DropdownMenuItem[][]>(() => [
 	}],
 	[{
 		label: "Sign out",
-		icon: "i-lucide-log-out",
+		icon: "i-pixelarticons-logout",
 		color: "error",
 		onSelect() {
 			signingOut.value = true;
@@ -33,7 +33,7 @@ const menu = computed<DropdownMenuItem[][]>(() => [
 <template>
 	<UHeader :toggle="false" to="/">
 		<template #title>
-			<UIcon name="i-lucide-lamp-desk" class="size-5 text-primary" />
+			<UIcon name="i-pixelarticons-lightbulb-on" class="size-5 text-primary" />
 			<span class="font-brand">{{ $rc.public.siteName || "Study House" }}</span>
 		</template>
 
@@ -41,7 +41,7 @@ const menu = computed<DropdownMenuItem[][]>(() => [
 			<UColorModeButton />
 			<template v-if="user">
 				<USlideover v-if="user.role === 'admin'" title="Manage house" description="Invite people in, and get members back in on a new device.">
-					<UButton label="Manage house" icon="i-lucide-settings-2" color="neutral" variant="ghost" :ui="{ label: 'hidden sm:inline' }" />
+					<UButton label="Manage house" icon="i-pixelarticons-sliders" color="neutral" variant="ghost" :ui="{ label: 'hidden sm:inline' }" />
 					<template #body>
 						<HostPanel />
 					</template>
@@ -54,7 +54,7 @@ const menu = computed<DropdownMenuItem[][]>(() => [
 						:loading="signingOut"
 						color="neutral"
 						variant="ghost"
-						trailing-icon="i-lucide-chevron-down"
+						trailing-icon="i-pixelarticons-chevron-down"
 						:ui="{ label: 'hidden sm:inline' }"
 					/>
 				</UDropdownMenu>

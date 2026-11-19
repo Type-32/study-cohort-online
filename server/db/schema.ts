@@ -60,6 +60,9 @@ export const houseState = pgTable("house_state", {
 	id: integer().primaryKey().default(1),
 	timerEndsAt: timestamp({ withTimezone: true }),
 	timerMinutes: integer(),
+	radioVideoId: text(),
+	radioStartedAt: timestamp({ withTimezone: true }),
+	radioPausedAt: timestamp({ withTimezone: true }),
 }, (t) => [check("house_state_single_row", sql`${t.id} = 1`)]);
 
 // Relations

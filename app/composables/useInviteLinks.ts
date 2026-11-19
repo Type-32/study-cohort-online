@@ -13,12 +13,12 @@ export function useInviteLinks() {
 	const origin = useRequestURL().origin;
 
 	function toastError(error: unknown, title: string) {
-		toast.add({ title, description: fetchErrorMessage(error), color: "error", icon: "i-lucide-circle-alert" });
+		toast.add({ title, description: fetchErrorMessage(error), color: "error", icon: "i-pixelarticons-alert" });
 	}
 
 	async function copyLink(code: string, description?: string) {
 		await copy(`${origin}/join/${code}`);
-		toast.add({ title: "Link copied", description, color: "success", icon: "i-lucide-copy-check" });
+		toast.add({ title: "Link copied", description, color: "success", icon: "i-pixelarticons-clipboard-note" });
 	}
 
 	/** Without `userId`: a signup link. With it: a re-entry link for that member. Throws after toasting. */

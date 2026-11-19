@@ -1,7 +1,7 @@
 import { defineWebSocketHandler } from 'h3'
 import { addPeer, removePeer } from '#server/utils/bus'
 import { connect, disconnect, touch } from '#server/utils/presence'
-import { setTimer, snapshot } from '#server/utils/house'
+import { applyRadio, setTimer, snapshot } from '#server/utils/house'
 import { useServerUsers } from '#server/utils/core/useServerUsers'
 import { clientMsgSchema } from '#shared/utils/realtime'
 import type { ServerMsg } from '#shared/utils/realtime'
@@ -47,6 +47,9 @@ export default defineWebSocketHandler({
 				break
 			case 'timer':
 				await setTimer(msg.action === 'start' ? msg.minutes! : null)
+				break
+			case 'radio':
+				await applyRadio(msg.action === 'play' ? { action: 'play', videoId: msg.videoId } : { action: msg.action })
 				break
 		}
 	},

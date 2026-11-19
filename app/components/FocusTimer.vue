@@ -19,10 +19,10 @@ const endsAtLocal = computed(() =>
 );
 const phase = computed(() =>
 	running.value
-		? { label: "Focus", color: "primary" as const, icon: "i-lucide-brain", hint: `Everyone's heads-down until ${endsAtLocal.value}.` }
+		? { label: "Focus", color: "primary" as const, icon: "i-pixelarticons-zap", hint: `Everyone's heads-down until ${endsAtLocal.value}.` }
 		: props.timer
-			? { label: "Break", color: "success" as const, icon: "i-lucide-coffee", hint: "Stretch, refill your tea. Start the next focus when you're ready." }
-			: { label: "Idle", color: "neutral" as const, icon: "i-lucide-timer", hint: "Start a focus and the whole house counts down together." },
+			? { label: "Break", color: "success" as const, icon: "i-pixelarticons-coffee", hint: "Stretch, refill your tea. Start the next focus when you're ready." }
+			: { label: "Idle", color: "neutral" as const, icon: "i-pixelarticons-clock", hint: "Start a focus and the whole house counts down together." },
 );
 </script>
 
@@ -51,10 +51,10 @@ const phase = computed(() =>
 
 		<div class="flex flex-wrap justify-center gap-2">
 			<template v-if="!running">
-				<UButton label="Focus 25 min" icon="i-lucide-play" size="lg" @click="emit('start', 25)" />
-				<UButton label="Focus 50 min" icon="i-lucide-play" size="lg" color="neutral" variant="subtle" @click="emit('start', 50)" />
+				<UButton label="Focus 25 min" icon="i-pixelarticons-play" size="lg" @click="emit('start', 25)" />
+				<UButton label="Focus 50 min" icon="i-pixelarticons-play" size="lg" color="neutral" variant="subtle" @click="emit('start', 50)" />
 			</template>
-			<UButton v-if="timer" :label="running ? 'Stop' : 'Clear'" icon="i-lucide-square" size="lg" color="neutral" variant="ghost" @click="emit('stop')" />
+			<UButton v-if="timer" :label="running ? 'Stop' : 'Clear'" icon="i-pixelarticons-stop" size="lg" color="neutral" variant="ghost" @click="emit('stop')" />
 		</div>
 	</UCard>
 </template>

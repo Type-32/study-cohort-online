@@ -12,8 +12,8 @@ const { data: invites, status: invitesStatus } = useFetch<InviteWithUser[]>("/ap
 const { data: members, status: membersStatus } = useFetch<User[]>("/api/v1/users", { lazy: true, default: () => [] });
 
 const tabs = [
-	{ label: "Invite links", icon: "i-lucide-link", slot: "invites" as const },
-	{ label: "Members", icon: "i-lucide-users", slot: "members" as const },
+	{ label: "Invite links", icon: "i-pixelarticons-link", slot: "invites" as const },
+	{ label: "Members", icon: "i-pixelarticons-users", slot: "members" as const },
 ] satisfies TabsItem[];
 
 function inviteState(invite: InviteWithUser) {
@@ -50,7 +50,7 @@ async function revoke(code: string) {
 	<UTabs :items="tabs" variant="link" class="w-full">
 		<template #invites>
 			<div class="flex flex-col gap-4 pt-2">
-				<UButton label="New signup link" icon="i-lucide-link" loading-auto class="self-start" @click="newSignupLink" />
+				<UButton label="New signup link" icon="i-pixelarticons-user-plus" loading-auto class="self-start" @click="newSignupLink" />
 
 				<div v-if="invitesStatus === 'pending' && !invites.length" class="flex flex-col gap-3">
 					<USkeleton v-for="n in 3" :key="n" class="h-10 w-full" />
@@ -58,7 +58,7 @@ async function revoke(code: string) {
 				<p v-else-if="!invites.length" class="text-sm text-muted">No links yet.</p>
 				<ul v-else class="divide-y divide-default">
 					<li v-for="invite in invites" :key="invite.code" class="flex items-center gap-3 py-2.5">
-						<UIcon :name="invite.user ? 'i-lucide-key-round' : 'i-lucide-ticket'" class="size-4 shrink-0 text-muted" />
+						<UIcon :name="invite.user ? 'i-pixelarticons-key' : 'i-pixelarticons-user-plus'" class="size-4 shrink-0 text-muted" />
 						<div class="min-w-0 flex-1" :class="inviteState(invite) && 'opacity-60'">
 							<p class="truncate text-sm font-medium text-highlighted">
 								{{ invite.user ? `Re-entry for ${invite.user.username}` : "Signup link" }}
@@ -70,10 +70,10 @@ async function revoke(code: string) {
 						</div>
 						<UBadge v-if="inviteState(invite)" :label="inviteState(invite)" color="neutral" variant="subtle" size="sm" />
 						<UTooltip v-else text="Copy link">
-							<UButton icon="i-lucide-copy" color="neutral" variant="ghost" aria-label="Copy link" @click="copyLink(invite.code)" />
+							<UButton icon="i-pixelarticons-copy" color="neutral" variant="ghost" aria-label="Copy link" @click="copyLink(invite.code)" />
 						</UTooltip>
 						<UTooltip text="Revoke">
-							<UButton icon="i-lucide-trash-2" color="error" variant="ghost" aria-label="Revoke link" @click="revoke(invite.code)" />
+							<UButton icon="i-pixelarticons-trash" color="error" variant="ghost" aria-label="Revoke link" @click="revoke(invite.code)" />
 						</UTooltip>
 					</li>
 				</ul>
@@ -92,7 +92,7 @@ async function revoke(code: string) {
 						<UButton
 							v-if="member.id !== $as.user.value?.id"
 							label="Re-entry link"
-							icon="i-lucide-key-round"
+							icon="i-pixelarticons-key"
 							color="neutral"
 							variant="subtle"
 							size="sm"

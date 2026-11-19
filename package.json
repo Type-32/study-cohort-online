@@ -7,11 +7,13 @@
     "dev": "nuxt dev",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
-    "typecheck": "nuxt typecheck"
+    "typecheck": "nuxt typecheck",
+    "test": "bun test tests"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.16",
     "@iconify-json/lucide": "^1.2.156",
+    "@iconify-json/pixelarticons": "^1.2.10",
     "@iconify-json/simple-icons": "^1.2.103",
     "@internationalized/date": "^3.12.4",
     "@nuxt/fonts": "^1.2.0",
@@ -40,6 +42,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@types/youtube": "^0.3.0",
     "typescript": "6.0.3",
     "vue-tsc": "^3.3.14"
   },
