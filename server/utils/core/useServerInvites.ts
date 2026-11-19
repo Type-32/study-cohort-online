@@ -76,15 +76,19 @@ export function useServerInvites() {
 		})
 	}
 
-	/** Without `userId`: a signup link. With `userId`: a single-use re-entry link valid for 7 days. */
+	/**
+	 * Without `userId`: a signup link (host only). With `userId`: a single-use re-entry link valid for 7 days
+	 * (the host for anyone, a member for themselves).
+	 */
 	async function createInviteHandler(event: H3Event, opts: { userId?: string, maxUses?: number, expiresAt?: Date }): Promise<Invite> {
-		await authorize(event, inviteAbilities().manageInvites)
-		const admin = await useServerAuth().requireUser(event)
+		if (opts.userId) await authorize(event, inviteAbilities().createReentryLink, opts.userId)
+		else await authorize(event, inviteAbilities().manageInvites)
+		const creator = await useServerAuth().requireUser(event)
 		const reentry = opts.userId
 			? { userId: opts.userId, maxUses: 1, expiresAt: new Date(Date.now() + REENTRY_TTL_MS) }
 			: { maxUses: opts.maxUses, expiresAt: opts.expiresAt }
 		const [invite] = await db.insert(schema.invite)
-			.values({ code: randomBytes(16).toString("base64url"), createdBy: admin.id, ...reentry })
+			.values({ code: randomBytes(16).toString("base64url"), createdBy: creator.id, ...reentry })
 			.returning()
 		return invite!
 	}

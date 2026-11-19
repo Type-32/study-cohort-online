@@ -84,8 +84,9 @@ If the first check fails, fall back to Server-Sent Events down (`createEventStre
 
 - `/signin`: while no account exists, "Set up this house" creates an `admin`. Concurrent setups are serialized with an advisory lock; exactly one wins. Afterwards the page says the house is invite-only.
 - `/join/[code]`: a signup link asks for a display name; a re-entry link shows "Welcome back, <name>" and a Continue button. A use is claimed by a conditional `UPDATE … RETURNING` in the same transaction as the account insert, so a failed join does not burn a use. Banned members are refused.
-- `/`: the host sees invite links (create, copy, revoke) and members (create a re-entry link). Everyone sees a sign-out button.
-- Endpoints: `GET/POST /api/v1/auth/setup`, `POST /api/v1/auth/join`, `GET /api/v1/invites/:code` (public), `GET/POST /api/v1/invites` and `DELETE /api/v1/invites/:code` (admin, `inviteAbilities().manageInvites`).
+- `/`: the host sees invite links (create, copy, revoke) and members (create a re-entry link). Everyone sees "Sign in on another device", which copies a re-entry link for their own account, and a sign-out button.
+- Endpoints: `GET/POST /api/v1/auth/setup`, `POST /api/v1/auth/join`, `GET /api/v1/invites/:code` (public), `GET /api/v1/invites` and `DELETE /api/v1/invites/:code` (admin, `inviteAbilities().manageInvites`). `POST /api/v1/invites`: signup links are admin-only; a re-entry link (`userId`) is allowed for the host for anyone, and for a member for themselves (`createReentryLink`).
+- Known gap: a member signed out on every device needs the host for a re-entry link, and a host signed out everywhere has no way back in short of inserting an `invite` row in the database by hand.
 - `POST /api/v1/auth/logout` returns JSON instead of a 302: the browser's fetch failed on the redirect, so sign-out cleared the cookie but never reloaded the page.
 
 **Session.** `runtimeConfig.session.maxAge` is one year. The cookie holds `{ id, role }`.

@@ -21,15 +21,15 @@ const { data: members } = await useFetch<User[]>("/api/v1/users", { immediate: i
 
 const origin = useRequestURL().origin;
 
-async function copyLink(code: string) {
+async function copyLink(code: string, description?: string) {
 	await copy(`${origin}/join/${code}`);
-	toast.add({ title: "Link copied", color: "success" });
+	toast.add({ title: "Link copied", description, color: "success" });
 }
 
 async function createInvite(userId?: string) {
 	const invite = await $fetch<Invite>("/api/v1/invites", { method: "POST", body: { userId } });
-	await refreshInvites();
-	await copyLink(invite.code);
+	if (isAdmin.value) await refreshInvites();
+	await copyLink(invite.code, userId === $as.user.value?.id ? "Open it on your other device. It works once, for 7 days." : undefined);
 }
 
 async function revokeInvite(code: string) {
@@ -43,7 +43,10 @@ async function revokeInvite(code: string) {
 		<UContainer class="flex flex-col gap-6 py-8">
 			<div class="flex items-center justify-between">
 				<p>Signed in as <strong>{{ $as.user.value?.username }}</strong></p>
-				<UButton label="Sign out" color="neutral" variant="ghost" icon="i-lucide-log-out" @click="$as.clear()" />
+				<div class="flex gap-2">
+					<UButton label="Sign in on another device" color="neutral" variant="ghost" icon="i-lucide-smartphone" @click="createInvite($as.user.value?.id)" />
+					<UButton label="Sign out" color="neutral" variant="ghost" icon="i-lucide-log-out" @click="$as.clear()" />
+				</div>
 			</div>
 
 			<UPageCard title="In the house" :description="status === 'OPEN' ? undefined : 'Connecting…'">
