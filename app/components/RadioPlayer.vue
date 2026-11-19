@@ -1,14 +1,21 @@
 <script setup lang="ts">
 /// <reference types="youtube" />
 import { radioPositionMs } from "#shared/utils/radio";
-import type { RadioIntent, RadioState } from "#shared/utils/radio";
+import type { RadioState } from "#shared/utils/radio";
 
 /**
  * The YouTube player for the shared radio. Client only. Each client plays locally and steers
  * toward the shared position, seeking only when it drifts past 2 seconds.
  */
 const props = defineProps<{ radio: NonNullable<RadioState>; clockOffsetMs: number; volume: number; muted: boolean }>();
-const emit = defineEmits<{ title: [title: string]; intent: [intent: RadioIntent] }>();
+const emit = defineEmits<{ title: [title: string] }>();
+/**
+ * True until the player first shows the house's real state for the current video: playing, or
+ * paused/cued when the house is paused, or the muted fallback, or an error. While true the video
+ * is covered, so YouTube's paused-looking thumbnail doesn't invite a click on a radio that is
+ * about to start by itself.
+ */
+const loading = defineModel<boolean>("loading", { default: true });
 
 const el = useTemplateRef<HTMLDivElement>("el");
 let player: YT.Player | undefined;
@@ -20,18 +27,8 @@ let playRequestedAt: number | undefined;
 const autoMuted = ref(false);
 /** Why YouTube refused the current video, if it did. Cleared when the house picks another one. */
 const error = ref<string>();
-
-// The player's own play/pause buttons control the radio for everyone, like ours. Clicks inside the
-// cross-origin iframe are invisible, but clicking it moves focus there and blurs the window; a state
-// change right after that came from the user, not from `sync`. Focus is handed back so the next
-// click in the player blurs the window again.
-let playerTouchedAt = 0;
-useEventListener("blur", () => {
-	const active = document.activeElement;
-	if (!(active instanceof HTMLIFrameElement) || !el.value?.contains(active)) return;
-	playerTouchedAt = Date.now();
-	setTimeout(() => active.blur(), 300);
-});
+watch(autoMuted, (on) => on && (loading.value = false));
+watch(error, (message) => message && (loading.value = false));
 
 const targetSeconds = () => radioPositionMs(props.radio, Date.now() + props.clockOffsetMs) / 1000;
 
@@ -43,6 +40,7 @@ function sync() {
 	if (loadedId !== radio.videoId) {
 		loadedId = radio.videoId;
 		error.value = undefined;
+		loading.value = true;
 		const args = { videoId: radio.videoId, startSeconds: targetSeconds() };
 		if (paused) player.cueVideoById(args);
 		else player.loadVideoById(args);
@@ -116,15 +114,14 @@ onMounted(async () => {
 				sync();
 			},
 			onStateChange(event) {
-				if (event.data === yt.PlayerState.PLAYING) {
+				const { PLAYING, PAUSED, CUED } = yt.PlayerState;
+				const housePaused = props.radio.pausedAtServerMs !== null;
+				if (event.data === PLAYING || (housePaused && (event.data === PAUSED || event.data === CUED))) loading.value = false;
+				if (event.data === PLAYING) {
 					playRequestedAt = undefined;
 					const title = player?.getVideoData().title;
 					if (title) emit("title", title);
 				}
-				if (Date.now() - playerTouchedAt > 1500) return;
-				const sharedPaused = props.radio.pausedAtServerMs !== null;
-				if (event.data === yt.PlayerState.PAUSED && !sharedPaused) emit("intent", { action: "pause" });
-				if (event.data === yt.PlayerState.PLAYING && sharedPaused) emit("intent", { action: "resume" });
 			},
 			onError(event) {
 				// 101 and 150: the owner disabled embedding. 100: removed or private. 2, 5: bad id or player error.
@@ -146,9 +143,24 @@ onBeforeUnmount(() => player?.destroy());
 
 <template>
 	<div class="flex flex-col gap-2">
-		<!-- YouTube requires the player to stay visible and at least 200x200. -->
-		<div class="aspect-video min-h-50 w-full overflow-hidden rounded-lg bg-black">
+		<!-- YouTube requires the player to stay visible and at least 200x200. It is not clickable:
+		     the radio's own buttons below control it for everyone. -->
+		<div class="relative aspect-video min-h-50 w-full overflow-hidden rounded-xl bg-black [&_iframe]:pointer-events-none">
 			<div ref="el" class="size-full" />
+			<AnimatePresence>
+				<Motion
+					v-if="loading"
+					key="loading"
+					class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black text-sm text-white/70"
+					role="status"
+					:initial="{ opacity: 1 }"
+					:exit="{ opacity: 0 }"
+					:transition="{ duration: 0.4 }"
+				>
+					<UIcon name="i-pixelarticons-loader" class="size-6 animate-spin" />
+					Tuning in…
+				</Motion>
+			</AnimatePresence>
 		</div>
 		<UAlert v-if="error" :title="error" icon="i-pixelarticons-alert" color="error" variant="soft" />
 		<UButton

@@ -156,7 +156,8 @@ Verified against a throwaway Postgres 18 in `nuxt dev`: 8 protocol checks (null 
 - `shared/utils/radio.ts`: `nextRadio()` applies an intent; the server runs it under `SELECT … FOR UPDATE` and skips the broadcast when nothing changed, the client runs it for the optimistic update. `parseYouTubeId()` takes watch, youtu.be, shorts, live, embed and music links or a bare id; the server only accepts a validated 11-character id. Unit tests: `bun run test` (`tests/radio.test.ts`).
 - `app/components/RadioPlayer.vue`: one YouTube IFrame player (`youtube-nocookie.com`, no controls, ≥200 px, always visible). Every 2s and on each state change it seeks only past 2s of drift, plays or pauses to match, and leaves ended videos alone. Live streams (`getVideoData().isLive`, undocumented) skip seeking.
 - Autoplay: a page with no click yet cannot start with sound. After 3s stalled without sticky activation the player plays muted to stay in sync and shows "Tap to listen".
-- The player's own play/pause (clicking the video) acts for everyone: a click inside the iframe blurs the window, and a pause or play within 1.5s of that becomes a shared `pause`/`resume` intent. Before this, `sync` undid the local pause.
+- The video itself is not clickable (`pointer-events: none` on the iframe), so YouTube's own overlay can't fight the shared state; the radio's buttons (with tooltips) control it, and "Open on YouTube" opens the track at the house's current position. While a track loads the video is covered by "Tuning in…" and the shared controls are disabled, so YouTube's paused-looking thumbnail doesn't invite a click.
+- The home page sits behind a loading screen until the first snapshot arrives and, if the radio is on, the player shows the real state (8s cap).
 - Migrations are applied by hand with `bunx nuxt-db migrate`, never at build. The first production deploy of this step ran without `0003_radio`: every snapshot failed to read `house_state`, so other devices saw the radio as off. Applied Nov 19.
 - "The video stopped after 10–20 minutes" (Nov 19) had the same cause. The play intent failed on the server, so the radio only existed as the sender's optimistic state. Once `0003_radio` was applied, the next reconnect (Vercel closes sockets about every 5 minutes) brought a snapshot with `radio: null`, which removed the player. Fix: when an intent fails, the server logs it, sends the sender `{ t: 'error' }` (shown as a toast) and a fresh snapshot, so a failure shows at once instead of minutes later.
 - Unplayable videos (embedding disabled, removed, private) show an error to everyone until someone plays another link.
@@ -170,16 +171,22 @@ Verified against a throwaway Postgres 18 in `nuxt dev`: 10 protocol checks (play
 
 Browsers discard (Chrome Memory Saver, Edge sleeping tabs) or freeze background tabs, which drops the member out of the house and stops the radio. Tabs playing audio are exempt, so `app/composables/useKeepAwake.ts` plays a 20 Hz tone at -60 dBFS: above Chromium's audibility threshold, inaudible in practice. It starts on the first click or key press (autoplay rules) and is on by default; the "Keep this tab awake" switch on the home page turns it off (localStorage). A Chromium tab restored after a discard with the switch off shows a toast pointing at the switch. Verified: the switch creates a running `AudioContext` and persists. Not verified: that browsers count the tone as audible (the tab's speaker icon or `chrome://discards` shows it).
 
-## Step 5: doors and nooks
+## Step 5: doors and nooks (done Nov 19)
 
-- New `member_state` table: `userId` (primary key), `door` (`open | ajar | closed`, default `open`), `slot`. Presence stays in `connection`.
-- `ClientMsg`: `{ t: 'door'; state }`, `{ t: 'sit'; slot }`. Both publish `member`.
-- Door state sets the YouTube volume on that client. Moves between rooms are not announced.
+- `member_state` (migration `0004_doors`, applied to production Nov 19): `userId` (primary key), `door` (`open | ajar | closed`, default `open`), `updatedAt`. No row means open. The door is durable: it stays as you left it across visits. Presence stays in `connection`.
+- `ClientMsg`: `{ t: 'door'; state }`. `MemberState` gains `door`; the server upserts it and publishes `member`, and joins and snapshots carry it (`presentMembers` left-joins `member_state`). Applied optimistically on the sender.
+- Changed from the plan: `sit` / `slot` moved to step 6. Slots come from the theme pack's scene, so there is nothing to sit in until the canvas exists.
+- Door → sound, per client: open hears the radio at your volume, ajar at a quarter of it, closed muted. The player keeps playing in sync behind a closed door, so opening it is instant. A hint under the radio says why it is faint or silent.
+- Door → how others see you: open "At their desk" (or "Focusing at their desk"), ajar "Lamp on" (dimmed), closed "Light under the door" (dimmer). Nobody disappears, and changes are not announced.
+- `app/components/DoorSwitch.vue`: Open / Ajar / Closed, each with a tooltip saying what it means.
+
+Verified against a throwaway Postgres 18 in `nuxt dev`: 9 protocol checks (default open, joins carry the door, closing reaches others without a `leave`, invalid door ignored, remembered across a reconnect and in the rejoin broadcast, ajar, snapshot shows every door). In a browser: open 60 → ajar 15 → closed muted (still playing) → open 60; the member list and hint follow each switch; the door was remembered across a reload.
 
 ## Step 6: canvas and theme packs
 
 - Add `pixi.js`. A client-only component draws the scene from a theme-pack JSON (backdrop, slots, object sprites) stored in S4.
 - The YouTube iframe is positioned over the canvas at the theme's TV slot. Nuxt UI panels sit above.
+- Seats (moved from step 5): `member_state.slot` and `{ t: 'sit'; slot }`, publishing `member`. Slot ids come from the theme pack; the server rejects a slot the theme doesn't have.
 - First real use of the blob driver. MEGA S4's path-style support was confirmed in step 0.
 
 ## Step 7: traces

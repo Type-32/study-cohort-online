@@ -65,6 +65,13 @@ export const houseState = pgTable("house_state", {
 	radioPausedAt: timestamp({ withTimezone: true }),
 }, (t) => [check("house_state_single_row", sql`${t.id} = 1`)]);
 
+// Durable per-member state. A member with no row has their door open.
+export const memberState = pgTable("member_state", {
+	userId: text().primaryKey().references(() => user.id, { onDelete: "cascade", onUpdate: "cascade" }),
+	door: text({ enum: ["open", "ajar", "closed"] }).default("open").notNull(),
+	updatedAt: timestamp({ withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
 // Relations
 
 export const userRelations = relations(user, ({ many }) => ({

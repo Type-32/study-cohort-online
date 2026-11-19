@@ -1,6 +1,6 @@
 import { defineWebSocketHandler } from 'h3'
 import { addPeer, removePeer } from '#server/utils/bus'
-import { connect, disconnect, touch } from '#server/utils/presence'
+import { connect, disconnect, setDoor, touch } from '#server/utils/presence'
 import { applyRadio, setTimer, snapshot } from '#server/utils/house'
 import { useServerUsers } from '#server/utils/core/useServerUsers'
 import { clientMsgSchema } from '#shared/utils/realtime'
@@ -44,7 +44,7 @@ export default defineWebSocketHandler({
 		if (!user) return peer.close(4401, 'Unauthorized')
 		await addPeer(peer)
 		try {
-			await connect(peer.id, { userId: user.id, username: user.username })
+			await connect(peer.id, user)
 			send(peer, { t: 'snapshot', house: await snapshot(), serverMs: Date.now() })
 		} catch (error) {
 			console.error('[ws] open failed:', error)
@@ -65,6 +65,12 @@ export default defineWebSocketHandler({
 				await touch(peer.id)
 				send(peer, { t: 'pong', clientMs: msg.clientMs, serverMs: Date.now() })
 				break
+			case 'door': {
+				const user = await memberOf(peer)
+				if (!user) return peer.close(4401, 'Unauthorized')
+				await setDoor(user, msg.state).catch((error) => rejectIntent(peer, 'move your door', error))
+				break
+			}
 			case 'timer':
 				await setTimer(msg.action === 'start' ? msg.minutes! : null)
 					.catch((error) => rejectIntent(peer, 'update the timer', error))
