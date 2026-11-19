@@ -13,7 +13,7 @@ const $as = useAuthSession();
 const isAdmin = computed(() => $as.user.value?.role === "admin");
 const toast = useToast();
 const { copy } = useClipboard({ legacy: true });
-const { house, status } = useHouse();
+const { house, status, clockOffsetMs, sendIntent } = useHouse();
 
 // ponytail: host panel lives on the home page until there is a room to put it beside.
 const { data: invites, refresh: refreshInvites } = await useFetch<InviteWithUser[]>("/api/v1/invites", { immediate: isAdmin.value });
@@ -56,6 +56,13 @@ async function revokeInvite(code: string) {
 					</li>
 				</ul>
 			</UPageCard>
+
+			<FocusTimer
+				:timer="house.timer"
+				:clock-offset-ms="clockOffsetMs"
+				@start="(minutes) => sendIntent({ t: 'timer', action: 'start', minutes })"
+				@stop="sendIntent({ t: 'timer', action: 'stop' })"
+			/>
 
 			<template v-if="isAdmin">
 				<UPageCard title="Invite links" description="Anyone with a signup link can join until you revoke it. Re-entry links work once, for 7 days.">

@@ -1,5 +1,5 @@
-import {bigserial, boolean, index, integer, pgTable, primaryKey, text, timestamp, uuid, varchar} from "drizzle-orm/pg-core";
-import {relations} from "drizzle-orm";
+import {bigserial, boolean, check, index, integer, pgTable, primaryKey, text, timestamp, uuid, varchar} from "drizzle-orm/pg-core";
+import {relations, sql} from "drizzle-orm";
 
 const createdUpdatedAtColumns = {
 	createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
@@ -54,6 +54,13 @@ export const connection = pgTable("connection", {
 	userId: text().notNull().references(() => user.id, { onDelete: "cascade", onUpdate: "cascade" }),
 	lastSeenAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
 }, (t) => [index().on(t.userId, t.lastSeenAt)]);
+
+// The house's live shared state, one row (`id` = 1). Timestamps only: clients derive the rest.
+export const houseState = pgTable("house_state", {
+	id: integer().primaryKey().default(1),
+	timerEndsAt: timestamp({ withTimezone: true }),
+	timerMinutes: integer(),
+}, (t) => [check("house_state_single_row", sql`${t.id} = 1`)]);
 
 // Relations
 

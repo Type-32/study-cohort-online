@@ -139,13 +139,15 @@ Known ceiling: an instance killed without running `close` leaves its members on 
 
 Verified against a throwaway Postgres 18, in `nuxt dev` and in a `vercel`-preset build under the launcher harness (13 checks each): snapshot contents, join and leave broadcasts, two tabs then one closing (no `leave`), last tab closing (`leave`), ping/pong and `lastSeenAt`, garbage messages ignored, stale rows excluded, banned and signed-out sockets refused, rows removed on close. In a browser: a second member appearing and leaving live, "Connecting…" while the server was down, and the list restored after it came back.
 
-## Step 3: timer
+## Step 3: timer (done Nov 18)
 
-- `house_state`: single row. Column `timer` holds `{ endsAtServerMs, minutes } | null`.
-- `ClientMsg`: `{ t: 'timer'; action: 'start' | 'stop'; minutes?: number }`. `ServerMsg`: `{ t: 'timer'; timer }`.
-- The client renders the countdown from `endsAtServerMs` and its clock offset. The server does nothing when the timer ends.
+- `house_state` (migration `0002_timer`): one row, enforced by `CHECK (id = 1)` and upserted on first write. Columns `timerEndsAt`, `timerMinutes`; both null when stopped. The radio adds its columns here in step 4.
+- `ClientMsg`: `{ t: 'timer'; action: 'start' | 'stop'; minutes?: number }`, minutes an integer 1–180 and required for `start`. `ServerMsg`: `{ t: 'timer'; timer: { endsAtServerMs, minutes } | null }`. `HouseState` and the snapshot carry `timer`.
+- Any member can start or stop it. The server computes `endsAt` from its own clock, writes, then publishes; it does nothing when the timer ends.
+- `server/utils/house.ts` holds house-wide state (`setTimer`, `snapshot`); `presence.ts` keeps connections and `presentMembers()`.
+- `app/components/FocusTimer.vue`: counts down from `endsAtServerMs` with the clock offset (VueUse `useNow`, 1s). States: running ("Focus" + mm:ss, Stop), ended ("Break", start buttons, Stop), stopped ("No timer"). Presets are 25 and 50 minutes. "Break" has no length yet; it lasts until someone starts the next focus.
 
-Check: two browsers show the same remaining time within a second, including one that joins mid-countdown.
+Verified against a throwaway Postgres 18 in `nuxt dev`: 8 protocol checks (null before first start, start reaches every socket with the same `endsAt`, late joiner's snapshot matches, invalid intents ignored, stop broadcasts null, restart after stop). In a browser: two tabs, the second opened mid-countdown, within 1s of each other (each ticks on its own second boundary); Stop in one tab and Start in the other propagate; a countdown reaching zero switches to "Break".
 
 ## Step 4: radio sync
 

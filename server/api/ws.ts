@@ -1,6 +1,7 @@
 import { defineWebSocketHandler } from 'h3'
 import { addPeer, removePeer } from '#server/utils/bus'
-import { connect, disconnect, snapshot, touch } from '#server/utils/presence'
+import { connect, disconnect, touch } from '#server/utils/presence'
+import { setTimer, snapshot } from '#server/utils/house'
 import { useServerUsers } from '#server/utils/core/useServerUsers'
 import { clientMsgSchema } from '#shared/utils/realtime'
 import type { ServerMsg } from '#shared/utils/realtime'
@@ -43,6 +44,9 @@ export default defineWebSocketHandler({
 			case 'ping':
 				await touch(peer.id)
 				send(peer, { t: 'pong', clientMs: msg.clientMs, serverMs: Date.now() })
+				break
+			case 'timer':
+				await setTimer(msg.action === 'start' ? msg.minutes! : null)
 				break
 		}
 	},
