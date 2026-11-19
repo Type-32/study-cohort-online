@@ -36,7 +36,7 @@ const menu = computed<DropdownMenuItem[][]>(() => [
 		to="/"
 		:ui="{
 			root: 'border-none bg-transparent backdrop-blur-none',
-			container: 'max-w-2xl',
+			container: 'max-w-none',
 			title: 'text-lg font-semibold font-serif',
 		}"
 	>
