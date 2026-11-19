@@ -5,10 +5,17 @@ definePageMeta({
 	middleware: ["signin-if-session-invalid"],
 });
 
-const { house, status, clockOffsetMs, loaded, sendIntent } = useHouse();
+const { house, status, clockOffsetMs, loaded, myDoor, sendIntent } = useHouse();
 const connected = computed(() => status.value === "OPEN");
 const now = useNow({ interval: 1000 });
 const focusing = computed(() => !!house.value.timer && house.value.timer.endsAtServerMs > now.value.getTime() + clockOffsetMs.value);
+
+/** How each door reads from the hall. Nobody is ever invisible, only further away. */
+const doorLook = computed(() => ({
+	open: { opacity: 1, label: focusing.value ? "Focusing at their desk" : "At their desk", chip: "success" as const },
+	ajar: { opacity: 0.7, label: "Lamp on", chip: "warning" as const },
+	closed: { opacity: 0.45, label: "Light under the door", chip: "neutral" as const },
+}));
 const { enabled: keepAwake } = useKeepAwake();
 
 // The page stays behind a loading screen until it shows the house as it is: the first snapshot
@@ -86,18 +93,20 @@ const enter = (index: number) => ({
 							as="li"
 							layout
 							:initial="{ opacity: 0, scale: 0.9 }"
-							:animate="{ opacity: 1, scale: 1 }"
+							:animate="{ opacity: doorLook[member.door].opacity, scale: 1 }"
 							:exit="{ opacity: 0, scale: 0.9 }"
 							:transition="{ duration: 0.25 }"
 						>
 							<UUser
 								:name="member.username"
-								:description="focusing ? 'Focusing' : 'Here now'"
+								:description="doorLook[member.door].label"
 								:avatar="{ alt: member.username }"
-								:chip="{ color: 'success', position: 'bottom-right' }"
+								:chip="{ color: doorLook[member.door].chip, position: 'bottom-right' }"
 							/>
 						</Motion>
 					</AnimatePresence>
+
+					<DoorSwitch :door="myDoor" @change="(door) => sendIntent({ t: 'door', state: door })" />
 				</div>
 			</Motion>
 
@@ -105,6 +114,7 @@ const enter = (index: number) => ({
 				<HouseRadio
 					:radio="house.radio"
 					:clock-offset-ms="clockOffsetMs"
+					:door="myDoor"
 					@intent="(intent) => sendIntent({ t: 'radio', ...intent })"
 					@settled="radioSettled = true"
 				/>

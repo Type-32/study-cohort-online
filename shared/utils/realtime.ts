@@ -8,8 +8,16 @@ import type { RadioState } from './radio'
 /** Client heartbeat cadence. The server treats a connection as gone after 3 missed pings. */
 export const PING_INTERVAL_MS = 20_000
 
+/**
+ * How far a member is from the commons. Open: at their desk, hearing the radio. Ajar: lamp on,
+ * the radio faint. Closed: a light under the door, no radio. Nobody is ever invisible.
+ */
+export const DOORS = ['open', 'ajar', 'closed'] as const
+export type Door = (typeof DOORS)[number]
+
 export const clientMsgSchema = z.discriminatedUnion('t', [
 	z.object({ t: z.literal('ping'), clientMs: z.number() }),
+	z.object({ t: z.literal('door'), state: z.enum(DOORS) }),
 	z.object({
 		t: z.literal('timer'),
 		action: z.enum(['start', 'stop']),
@@ -26,6 +34,7 @@ export type ClientMsg = z.infer<typeof clientMsgSchema>
 export interface MemberState {
 	userId: string
 	username: string
+	door: Door
 }
 
 /** The shared focus timer. Clients count down from `endsAtServerMs` with their clock offset. */

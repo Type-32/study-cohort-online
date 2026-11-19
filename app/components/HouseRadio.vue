@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { parseYouTubeId, radioPositionMs } from "#shared/utils/radio";
 import type { RadioIntent, RadioState } from "#shared/utils/radio";
+import type { Door } from "#shared/utils/realtime";
 
-const props = defineProps<{ radio: RadioState; clockOffsetMs: number }>();
+const props = defineProps<{ radio: RadioState; clockOffsetMs: number; door: Door }>();
 const emit = defineEmits<{ intent: [intent: RadioIntent]; settled: [] }>();
 
 const link = ref("");
@@ -12,6 +13,14 @@ const title = ref<string>();
 // Sound settings are per listener; read after mount so server and client renders agree.
 const volume = useLocalStorage("house:radio-volume", 60, { initOnMounted: true });
 const muted = useLocalStorage("house:radio-muted", false, { initOnMounted: true });
+
+// Your door sets how much of the commons you hear: all of it, a quarter through an ajar door, none
+// through a closed one. The player keeps playing in sync either way, so opening the door is instant.
+const doorVolume = computed(() => Math.round(volume.value * (props.door === "ajar" ? 0.25 : 1)));
+const doorMuted = computed(() => muted.value || props.door === "closed");
+const doorHint = computed(() =>
+	props.door === "ajar" ? "Your door is ajar, so the radio is faint." : props.door === "closed" ? "Your door is closed, so you can't hear the radio." : undefined,
+);
 
 const paused = computed(() => props.radio?.pausedAtServerMs != null);
 
@@ -74,8 +83,8 @@ function openOnYouTube() {
 					<RadioPlayer
 						:radio="radio"
 						:clock-offset-ms="clockOffsetMs"
-						:volume="volume"
-						:muted="muted"
+						:volume="doorVolume"
+						:muted="doorMuted"
 						v-model:loading="playerLoading"
 						@title="title = $event"
 					/>
@@ -119,6 +128,22 @@ function openOnYouTube() {
 				</UTooltip>
 			</div>
 		</div>
+
+		<AnimatePresence mode="wait">
+			<Motion
+				v-if="radio && doorHint"
+				:key="doorHint"
+				as="p"
+				class="flex items-center gap-1.5 text-xs text-muted"
+				:initial="{ opacity: 0, height: 0 }"
+				:animate="{ opacity: 1, height: 'auto' }"
+				:exit="{ opacity: 0, height: 0 }"
+				:transition="{ duration: 0.2 }"
+			>
+				<UIcon :name="door === 'closed' ? 'i-pixelarticons-door-closed' : 'i-pixelarticons-lightbulb-on'" class="size-3.5" />
+				{{ doorHint }}
+			</Motion>
+		</AnimatePresence>
 
 		<form @submit.prevent="play">
 			<UInput

@@ -171,16 +171,22 @@ Verified against a throwaway Postgres 18 in `nuxt dev`: 10 protocol checks (play
 
 Browsers discard (Chrome Memory Saver, Edge sleeping tabs) or freeze background tabs, which drops the member out of the house and stops the radio. Tabs playing audio are exempt, so `app/composables/useKeepAwake.ts` plays a 20 Hz tone at -60 dBFS: above Chromium's audibility threshold, inaudible in practice. It starts on the first click or key press (autoplay rules) and is on by default; the "Keep this tab awake" switch on the home page turns it off (localStorage). A Chromium tab restored after a discard with the switch off shows a toast pointing at the switch. Verified: the switch creates a running `AudioContext` and persists. Not verified: that browsers count the tone as audible (the tab's speaker icon or `chrome://discards` shows it).
 
-## Step 5: doors and nooks
+## Step 5: doors and nooks (done Nov 19)
 
-- New `member_state` table: `userId` (primary key), `door` (`open | ajar | closed`, default `open`), `slot`. Presence stays in `connection`.
-- `ClientMsg`: `{ t: 'door'; state }`, `{ t: 'sit'; slot }`. Both publish `member`.
-- Door state sets the YouTube volume on that client. Moves between rooms are not announced.
+- `member_state` (migration `0004_doors`, applied to production Nov 19): `userId` (primary key), `door` (`open | ajar | closed`, default `open`), `updatedAt`. No row means open. The door is durable: it stays as you left it across visits. Presence stays in `connection`.
+- `ClientMsg`: `{ t: 'door'; state }`. `MemberState` gains `door`; the server upserts it and publishes `member`, and joins and snapshots carry it (`presentMembers` left-joins `member_state`). Applied optimistically on the sender.
+- Changed from the plan: `sit` / `slot` moved to step 6. Slots come from the theme pack's scene, so there is nothing to sit in until the canvas exists.
+- Door → sound, per client: open hears the radio at your volume, ajar at a quarter of it, closed muted. The player keeps playing in sync behind a closed door, so opening it is instant. A hint under the radio says why it is faint or silent.
+- Door → how others see you: open "At their desk" (or "Focusing at their desk"), ajar "Lamp on" (dimmed), closed "Light under the door" (dimmer). Nobody disappears, and changes are not announced.
+- `app/components/DoorSwitch.vue`: Open / Ajar / Closed, each with a tooltip saying what it means.
+
+Verified against a throwaway Postgres 18 in `nuxt dev`: 9 protocol checks (default open, joins carry the door, closing reaches others without a `leave`, invalid door ignored, remembered across a reconnect and in the rejoin broadcast, ajar, snapshot shows every door). In a browser: open 60 → ajar 15 → closed muted (still playing) → open 60; the member list and hint follow each switch; the door was remembered across a reload.
 
 ## Step 6: canvas and theme packs
 
 - Add `pixi.js`. A client-only component draws the scene from a theme-pack JSON (backdrop, slots, object sprites) stored in S4.
 - The YouTube iframe is positioned over the canvas at the theme's TV slot. Nuxt UI panels sit above.
+- Seats (moved from step 5): `member_state.slot` and `{ t: 'sit'; slot }`, publishing `member`. Slot ids come from the theme pack; the server rejects a slot the theme doesn't have.
 - First real use of the blob driver. MEGA S4's path-style support was confirmed in step 0.
 
 ## Step 7: traces
