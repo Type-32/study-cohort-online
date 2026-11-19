@@ -1,4 +1,6 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+import { fileURLToPath } from 'node:url'
+
 export default defineNuxtConfig({
 	modules: [
 		'@nuxt/ui',
@@ -25,6 +27,22 @@ export default defineNuxtConfig({
 				'zod',
 				'@internationalized/date',
 			]
+		},
+	},
+
+	nitro: {
+		experimental: {
+			websocket: true,
+		},
+	},
+
+	hooks: {
+		// nitropack 2's Vercel runtime has no WebSocket upgrade; this entry adds it.
+		// Set here, not in `nitro.entry`, so the prerenderer keeps its own entry.
+		'nitro:init'(nitro) {
+			if (nitro.options.preset === 'vercel') {
+				nitro.options.entry = fileURLToPath(new URL('./server/vercel-entry.ts', import.meta.url))
+			}
 		},
 	},
 

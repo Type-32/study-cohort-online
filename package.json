@@ -23,6 +23,7 @@
     "@type32/nuxt-ui-extras": "^0.1.2",
     "@vercel/blob": "^2.9.0",
     "@vueuse/nuxt": "15.0.0",
+    "crossws": "^0.4.17",
     "drizzle-kit": "^0.31.11",
     "drizzle-orm": "^0.45.4",
     "motion-v": "^2.13.0",
@@ -38,6 +39,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@types/node": "^26.6.6",
     "typescript": "6.0.3",
     "vue-tsc": "^3.3.14"
   },
