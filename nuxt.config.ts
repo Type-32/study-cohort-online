@@ -14,7 +14,9 @@ export default defineNuxtConfig({
 		'@vueuse/nuxt',
 		'nuxt-security',
 		'motion-v/nuxt',
-		'vue3-pixi-nuxt'
+		'vue3-pixi-nuxt',
+		'@pinia/colada-nuxt',
+		'@pinia/nuxt'
 	],
 
 	devtools: {

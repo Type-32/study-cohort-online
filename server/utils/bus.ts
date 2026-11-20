@@ -1,5 +1,6 @@
 import postgres from 'postgres'
 import { sql } from 'drizzle-orm'
+import type { SQL } from 'drizzle-orm'
 import { db } from '@nuxthub/db'
 import type { ServerMsg } from '#shared/utils/realtime'
 
@@ -38,7 +39,12 @@ export function removePeer(peer: BusPeer) {
 	peers.delete(peer)
 }
 
-/** Sends `msg` to every connected peer on every instance. */
-export async function publish(msg: ServerMsg) {
-	await db.execute(sql`select pg_notify(${CHANNEL}, ${JSON.stringify(msg)})`)
+/**
+ * Sends `msg` to every connected peer on every instance. Postgres delivers notifications in commit
+ * order, so publish inside the transaction that made the change (`tx`): two changes then reach
+ * everyone in the order they were stored. `unless`: a subquery; nothing is sent if it has rows,
+ * checked in the same statement.
+ */
+export async function publish(msg: ServerMsg, { tx = db, unless }: { tx?: Pick<typeof db, 'execute'>; unless?: SQL } = {}) {
+	await tx.execute(sql`select pg_notify(${CHANNEL}, ${JSON.stringify(msg)}) ${unless ? sql`where not exists (${unless})` : sql``}`)
 }

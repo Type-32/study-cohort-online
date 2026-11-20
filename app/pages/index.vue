@@ -5,7 +5,11 @@ definePageMeta({
 	middleware: ["signin-if-session-invalid"],
 });
 
-const { house, status, clockOffsetMs, loaded, myDoor, sendIntent } = useHouse();
+const houseStore = useHouseStore();
+const { house, status, clockOffsetMs, loaded } = storeToRefs(houseStore);
+// The socket is this page's: open while it's shown, closed when you leave it.
+onMounted(houseStore.connect);
+onBeforeUnmount(houseStore.disconnect);
 const connected = computed(() => status.value === "OPEN");
 const now = useNow({ interval: 1000 });
 const focusing = computed(() => !!house.value.timer && house.value.timer.endsAtServerMs > now.value.getTime() + clockOffsetMs.value);
@@ -69,12 +73,7 @@ const enter = (index: number) => ({
 		<UContainer class="flex max-w-2xl flex-col gap-20 pt-24 pb-24">
 			<Motion v-bind="enter(0)">
 				<div ref="timerEl">
-					<FocusTimer
-						:timer="house.timer"
-						:clock-offset-ms="clockOffsetMs"
-						@start="(minutes) => sendIntent({ t: 'timer', action: 'start', minutes })"
-						@stop="sendIntent({ t: 'timer', action: 'stop' })"
-					/>
+					<FocusTimer />
 				</div>
 			</Motion>
 
@@ -106,18 +105,12 @@ const enter = (index: number) => ({
 						</Motion>
 					</AnimatePresence>
 
-					<DoorSwitch :door="myDoor" @change="(door) => sendIntent({ t: 'door', state: door })" />
+					<DoorSwitch />
 				</div>
 			</Motion>
 
 			<Motion v-bind="enter(2)">
-				<HouseRadio
-					:radio="house.radio"
-					:clock-offset-ms="clockOffsetMs"
-					:door="myDoor"
-					@intent="(intent) => sendIntent({ t: 'radio', ...intent })"
-					@settled="radioSettled = true"
-				/>
+				<HouseRadio @settled="radioSettled = true" />
 			</Motion>
 
 			<Motion v-bind="enter(3)">

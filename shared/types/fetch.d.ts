@@ -13,4 +13,8 @@ export interface InviteInfo {
 	username?: string;
 }
 
-export type InviteWithUser = Invite & { user: { username: string } | null };
+/** A row of the host's invite list: a re-entry link's member, and who joined through a signup link. */
+export type InviteListItem = Invite & {
+	user: { username: string } | null;
+	joined: { id: string; username: string }[];
+};

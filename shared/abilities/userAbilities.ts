@@ -21,14 +21,15 @@ export function userAbilities() {
 			return satisfies(user, { minRole: 'admin' }) && user.id !== targetUser.id
 		}),
 
+		// Host only: moderators manage the radio, so only the host decides who is one.
 		promoteUser: defineAbility((user: User, targetUser?: User) => {
 			if (!targetUser) return false;
-			return satisfies(user, { minRole: 'moderator' }) && targetUser.role === 'user'
+			return satisfies(user, { minRole: 'admin' }) && targetUser.role === 'user'
 		}),
 
 		demoteUser: defineAbility((user: User, targetUser?: User) => {
 			if (!targetUser) return false;
-			return satisfies(user, { minRole: 'moderator' }) && satisfies(targetUser, { minRole: 'moderator' })
+			return satisfies(user, { minRole: 'admin' }) && targetUser.role === 'moderator'
 		}),
 
 		banUser: defineAbility((user: User, targetUser?: User) => {

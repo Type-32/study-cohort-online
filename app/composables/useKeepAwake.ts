@@ -11,25 +11,22 @@ export function useKeepAwake() {
 	// Read after mount so the server render and the first client render agree.
 	const enabled = useLocalStorage("house:keep-awake", true, { initOnMounted: true });
 	const toast = useToast();
-	let context: AudioContext | undefined;
+	let tone: OscillatorNode | undefined;
 
-	function start() {
-		// Browsers only let an AudioContext start after a click or key press on the page; creating one
-		// earlier logs a warning and leaves it suspended. The listeners below retry on the first gesture.
-		if (!navigator.userActivation?.hasBeenActive) return;
-		if (context) return void context.resume();
-		context = new AudioContext();
-		const tone = context.createOscillator();
+	const start = useAudioContext((context) => {
+		if (!enabled.value || tone) return;
+		tone = context.createOscillator();
 		tone.frequency.value = 20;
 		const gain = context.createGain();
 		gain.gain.value = 0.001;
 		tone.connect(gain).connect(context.destination);
 		tone.start();
-	}
+	});
 
 	function stop() {
-		void context?.close();
-		context = undefined;
+		tone?.stop();
+		tone?.disconnect();
+		tone = undefined;
 	}
 
 	onMounted(() => {
@@ -44,10 +41,6 @@ export function useKeepAwake() {
 		}
 		watch(enabled, (on) => (on ? start() : stop()), { immediate: true });
 	});
-
-	const startOnGesture = () => enabled.value && context?.state !== "running" && start();
-	useEventListener("pointerdown", startOnGesture, { passive: true });
-	useEventListener("keydown", startOnGesture, { passive: true });
 
 	onScopeDispose(stop);
 

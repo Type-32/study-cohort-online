@@ -35,7 +35,7 @@ const user = computed(() => $as.user.value);
 const signingOut = ref(false);
 
 // Live status, written by the home page.
-const { house, clockOffsetMs } = useHouseState();
+const { house, clockOffsetMs } = storeToRefs(useHouseStore());
 const offscreen = useState("house:offscreen", () => ({ timer: false, members: false }));
 const { running, countdown, phase } = useTimerView(computed(() => house.value.timer), clockOffsetMs);
 
@@ -67,7 +67,7 @@ const menu = computed<DropdownMenuItem[][]>(() => [
 		label: "Sign in on another device",
 		icon: "i-pixelarticons-smartphone",
 		async onSelect() {
-			const invite = await createLink(user.value!.id);
+			const invite = await createLink({ userId: user.value!.id });
 			await copyLink(invite.code, "Open it on your other device. It works once, for 7 days.");
 		},
 	}],
