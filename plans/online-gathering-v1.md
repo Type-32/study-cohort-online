@@ -13,8 +13,8 @@ Steps 6 to 11 and 14 were added on Nov 19; the canvas and traces moved from 6 an
 | 0–5 | Transport, accounts, presence, timer, radio, doors | Done | |
 | 6 | Single-use signup links | Done Nov 19 | Migration `0005` (applied) |
 | 7 | Door sound settings (quieter or muffled) | Done Nov 19; levels need a listen | Client only |
-| 8 | Suggestions and the queue | Planned | Migration `0006` |
-| 9 | The radio as an object (LCD, keys, knob, shelf) | Planned | Step 8; client only |
+| 8 | Suggestions and the queue | Done Nov 19 | Migration `0006` (applied) |
+| 9 | The radio as an object (LCD, keys, knob, shelf) | Done Nov 19 | Client only |
 | 10 | The tuner: a dial of every track played before | Planned | Steps 8 and 9 |
 | 11 | Notes (text chat) | Planned | Migration `0007` |
 | 12 | Canvas and theme packs | Planned | Skins the step 9 radio |
@@ -295,7 +295,7 @@ Starting levels, to be tuned by ear. They live in one constants object.
 
 Verified in a browser (Chromium, `nuxt dev` on a throwaway Postgres) at slider 60, reading the player's volume and the bed's gain: open 60, no bed; ajar default 15; ajar muffled 9 with bed 0.03; closed default muted; closed quieter 5; closed muffled 5 with bed 0.048; paused bed 0; open again 60, bed 0. One `AudioContext`, one keep-awake oscillator, one bed reused across changes. The setting persisted. **Not verified:** how it sounds. The levels above are starting points; listen on speakers and headphones and adjust `DOOR_SOUND_LEVELS`.
 
-## Step 8: suggestions and the queue
+## Step 8: suggestions and the queue (done Nov 19)
 
 Members propose tracks; the host decides the order. This replaces "anyone pastes a link and it plays for everyone" (decided Nov 19): members can no longer put a link straight on air or turn the radio off. They suggest, and can still pause and resume.
 
@@ -425,7 +425,26 @@ Moderator checks: a moderator's `queue`, `skip`, direct `play`, `seek` and `radi
 
 Seek checks: a member's `seek` is refused; a host seek moves a second tab's player within one 2 s tick; a seek while paused stays paused at the new point; the dragged bar doesn't jump back before the broadcast; given a hard-coded `chapters` list, the bar shows segments and the current chapter; a live stream shows no bar.
 
-## Step 9: the radio as an object
+### Built (Nov 19)
+
+Files: `server/utils/radioQueue.ts` (the shelf, the catalog, moving on, oEmbed, permissions), `shared/utils/radio.ts` (`RadioState` gains `title`, `by`, `station`; `seek`; `shelfOrder`, `nextUp`, `queuePositionFor`), `shared/utils/realtime.ts` (the intents), `app/stores/house.ts` (shelf state and optimistic shelf intents; `report()` for player reports), `app/components/RadioShelf.vue`, `RadioProgress.vue`, `HouseRadio.vue`, `RadioPlayer.vue` (reports and length), `HostPanel.vue` (make or remove moderators). Migration `0006_radio_queue`: the three tables and the `house_state` columns; the track on air when it ran became station 1. Applied to production Nov 19 (production's track on air became station 1).
+
+Changed from the design above:
+
+- **A refusal skips a track only when every member present was refused.** In the browser test, a second member on a different address (`[::1]` instead of `localhost`) got error 150 for videos that played fine for the host, so their player alone skipped tracks for everyone and marked them unplayable. YouTube's "embedding not allowed" can depend on the viewer (region, the page's address), not just the video. `house_state.radioUnplayableBy` collects the members whose player refused the track on air; the radio moves on, and the station is marked, only once every member present is in it. A member who can't play a track sees "Can't play" while the others keep listening.
+- **`house_state.radioEndedAt`**: set when the players report the track over and nothing follows (Stop). That's how the server knows the radio is idle, so the next suggestion, or switching to Shuffle, starts a track at once.
+- **One lock instead of a per-member advisory lock.** Every shelf and radio change runs under the `house_state` row lock, which also serializes the limit of 3.
+- **The intent id rides on the last message an intent causes** (play from the shelf publishes `unsuggest` then `radio`), so the sender's optimistic copy is dropped only once all of it has arrived. An intent that changes nothing is answered with the radio as it is.
+- **Wire names**: `{ t: 'radio'; action: 'playSuggestion'; suggestionId }` (not `play` with a `suggestionId`); `skip` and `stop` are separate shapes; `suggest` takes `queue: true` for the host's "Add to the queue". Player reports carry no intent id and get no answer.
+- **Refusals read as sentences** ("That one is already on the shelf.", "Only the host and moderators can do that."): `HouseError` is shown as is, without the snapshot that follows an unexpected failure.
+- **oEmbed**: 400 or 404 refuses the link; 401 and 403 keep it without a title; a timeout or network error keeps it without a title and doesn't cache, so the next try asks again.
+- **Promote and demote are host only**, and demote only applies to moderators.
+- **The progress bar**: one seek per drag or per burst of arrow keys (250 ms). Not done: `aria-valuetext` on the thumb; `USlider` doesn't expose the thumb's attributes.
+- **Player cover**: the "Tuning in…" / "Track over" cover now fades with CSS. With `AnimatePresence`, a quick phase change left an invisible "Tuning in…" in the page's live region.
+
+Verified against a throwaway Postgres 18 (UTF-8; the default Windows-locale cluster is WIN1252 and refused a Korean title, production is UTF8) in `nuxt dev` on port 3001: 53 protocol checks, all passing. They cover every check listed above, plus: one refused player doesn't skip, all present refused does, and the refusal list resets per track; a non-Latin title is stored; a replayed track keeps its station and counts the play. 7 unit tests (`bun run test`). In a browser with the host on `localhost` and a member on `[::1]`: the host saw Skip, Turn off, Play now, Add to the queue and per-row Play now / Play next / Take out of the queue / Remove; the member saw only Pause, Open on YouTube, Mute, Suggest and Withdraw on their own row, with "2 of 3 suggestions left". The member's player refused the track (error 150) and the radio stayed on air for the host. The host pressed End on the bar; the track ended and the queue's next track came on air in both tabs. A throwaway page with hard-coded chapters showed the segments, "1:47 · Rainy night" on hover, a read-only bar without a thumb, and `LIVE` for a live stream.
+
+## Step 9: the radio as an object (done Nov 19)
 
 The radio section becomes one object that looks and works like a radio and holds everything from steps 7 and 8. It is built in DOM and CSS, not on the canvas: it has real controls (keyboard, screen readers) and the YouTube iframe has to be a DOM element anyway. In step 12 the canvas only places it at the theme's radio slot and reskins it.
 
@@ -488,6 +507,28 @@ The bottom line always shows the door (`DOOR AJAR · MUFFLED`) and the queue len
 **Outline for theme packs.** The radio's look comes from CSS custom properties on its root: `--radio-body`, `--radio-trim`, `--radio-key`, `--radio-lcd-bg`, `--radio-lcd-fg`, `--radio-grille`, `--radio-radius`. Their defaults are Nuxt UI tokens, so light and dark work. In step 12 the theme pack's JSON gains `radio: { slot, skin, frame? }`: where it stands in the scene, values for those properties, and an optional sprite around it. A theme changes the look (boombox, TV, jukebox), never the layout or the controls.
 
 **Checks:** every LCD state in a browser; the whole radio operated by keyboard only; a 390 px screenshot; reduced motion; light and dark.
+
+### Built (Nov 19)
+
+Files: `HouseRadio.vue` (the cabinet: screen, LCD, knob, grille, progress bar, keys, when-empty switch, door-sound switch, tape slot; the theme variables), `RadioLcd.vue`, `RadioKnob.vue`, `RadioShelf.vue` (cassettes), `RadioPlayer.vue`, `DoorSwitch.vue`. `formatTrackTime()` moved to `shared/utils/radio.ts`. No protocol or schema change.
+
+Changed from the design above:
+
+- **The door-sound choice lives only on the radio** now: the switch offers the choices for the door you have now (ajar: Quieter or Muffled; closed: Silent, Quieter or Muffled). The headphone popover by "Your door" is gone. With the door open the switch reads "Your door is open: you hear the radio at your volume."
+- **The when-empty switch moved onto the cabinet**, next to the keys. Members see it disabled, with a tooltip saying the host chooses.
+- **No `CH 3/12` line**: nothing supplies chapters yet (see step 8, "Chapters, later").
+- **LCD type is the app's mono font** (JetBrains Mono); it reads as an LCD, so no pixel font was added.
+- **Refusals show on the screen.** When YouTube refuses a track, the screen's cover shows the reason ("No signal here: this video's owner doesn't allow it outside YouTube.") over YouTube's own "Video unavailable" page, and the LCD reads `NO SIGNAL`. The red alert under the screen is gone.
+- **Light mode LCD text is primary 700**: the default primary (500) on the pale LCD was too faint (lightness 0.70 on 0.95). Dark mode keeps primary.
+
+Bugs found and fixed while building:
+
+- The LCD and knob column pushed out of the cabinet on wide screens (reported by the host with a screenshot): grid columns sized `3fr 2fr` are at least as wide as their longest unbroken line, the LCD's title. Columns are now `minmax(0, …)`.
+- At 390 px the screen stuck out: YouTube's 200 px minimum height at 16:9 is 356 px wide, wider than the cabinet. The single phone column is `minmax(0, 1fr)`, so the screen takes the column's width and stays 200 px tall (YouTube letterboxes it).
+- After a reload with a track on air, the player never mounted and the radio sat at "Tuning", keys disabled, behind the loading screen: the server-rendered "off" panel's exit under `AnimatePresence mode="wait"` never finished. The screen now swaps without an exit animation. (The third time `AnimatePresence` held a stale element in this app; prefer fade-ins or CSS transitions for things that change quickly.)
+- The knob's indicator used `bg-highlighted`, which isn't a Nuxt UI utility, so it didn't render; now `bg-inverted`.
+
+Verified in a browser (`nuxt dev` on port 3001, throwaway UTF-8 Postgres): LCD lines for Off, Tuning, On air (`● ON AIR`, title, `0:04 / 3:33`, `PICKED BY WILSON`, `NEXT ▸ —`), Paused, Track over (`INSERT A LINK` with Stop and an empty shelf), No signal, and the bottom line (`DOOR AJAR · MUFFLED`, `Q 1`, `VOL ▮▮▮▮▮▮▯▯▯▯ 63` while the knob turns). Keyboard only: the knob's arrow keys changed the volume with a visible focus ring; Tab went progress bar → Pause → Skip → Turn off → Mute → Open on YouTube → Shuffle → Stop → link; Enter paused and resumed; typing a link and Space on "Add to the queue" queued it twice. Tooltips still show on the pressable keys. At desktop width and in a 390 px frame no part sticks out of the cabinet, and every radio button is at least 44 px. Light and dark colors read correctly. Reduced motion: the rules that stop the scrolling title, the blinking and the grille are in the page; the test browser can't emulate the preference, so they weren't seen switching. Screenshots of the whole radio couldn't be taken in this browser (they time out above its small window); the host's own screenshots were used for the overflow and the refusal.
 
 ## Step 10: the tuner
 

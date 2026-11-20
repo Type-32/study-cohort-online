@@ -1,7 +1,8 @@
 import { defineWebSocketHandler } from 'h3'
 import { addPeer, removePeer } from '#server/utils/bus'
 import { connect, disconnect, setDoor, touch } from '#server/utils/presence'
-import { applyRadio, setTimer, snapshot } from '#server/utils/house'
+import { setTimer, snapshot } from '#server/utils/house'
+import { HouseError, playerReport, queue, radioAction, setWhenEmpty, suggest, unsuggest } from '#server/utils/radioQueue'
 import { useServerUsers } from '#server/utils/core/useServerUsers'
 import { clientMsgSchema } from '#shared/utils/realtime'
 import type { ServerMsg } from '#shared/utils/realtime'
@@ -25,10 +26,12 @@ function send(peer: { send(data: string): unknown }, msg: ServerMsg) {
 
 /**
  * The sender already applied its intent locally (optimistic UI). If the server could not, tell it
- * which intent failed (it drops its optimistic copy) and send the real state back, so the sender
- * snaps to it now instead of diverging until the next snapshot.
+ * which intent failed (it drops its optimistic copy). A refusal (`HouseError`, "That one is already
+ * on the shelf.") is shown as is. Anything else is logged, and the real state is sent back so the
+ * sender snaps to it now instead of diverging until the next snapshot.
  */
 async function rejectIntent(peer: { send(data: string): unknown }, what: string, intent: string | undefined, error: unknown) {
+	if (error instanceof HouseError) return send(peer, { t: 'error', message: error.message, intent })
 	console.error(`[ws] ${what} failed:`, error)
 	send(peer, { t: 'error', message: `Couldn't ${what}. The house wasn't changed; try again.`, intent })
 	try {
@@ -47,25 +50,35 @@ async function handle(peer: Peer, message: Message) {
 	}
 	if (!parsed.success) return
 	const msg = parsed.data
+	if (msg.t === 'ping') {
+		await touch(peer.id)
+		return send(peer, { t: 'pong', clientMs: msg.clientMs, serverMs: Date.now() })
+	}
+	// Read on every intent, not cached on the socket: a ban or a demotion applies at once.
+	const user = await memberOf(peer)
+	if (!user) return peer.close(4401, 'Unauthorized')
+	const reject = (what: string) => (error: unknown) => rejectIntent(peer, what, 'id' in msg ? msg.id : undefined, error)
 	switch (msg.t) {
-		case 'ping':
-			await touch(peer.id)
-			send(peer, { t: 'pong', clientMs: msg.clientMs, serverMs: Date.now() })
-			break
-		case 'door': {
-			const user = await memberOf(peer)
-			if (!user) return peer.close(4401, 'Unauthorized')
-			await setDoor(user, msg.state, msg.id).catch((error) => rejectIntent(peer, 'move your door', msg.id, error))
-			break
-		}
+		case 'door':
+			return setDoor(user, msg.state, msg.id).catch(reject('move your door'))
 		case 'timer':
-			await setTimer(msg.action === 'start' ? msg.minutes! : null, msg.id)
-				.catch((error) => rejectIntent(peer, 'update the timer', msg.id, error))
-			break
+			return setTimer(msg.action === 'start' ? msg.minutes! : null, msg.id).catch(reject('update the timer'))
+		case 'suggest':
+			return suggest(user, msg, msg.id).catch(reject('add your suggestion'))
+		case 'unsuggest':
+			return unsuggest(user, msg.suggestionId, msg.id).catch(reject('take that off the shelf'))
+		case 'queue':
+			return queue(user, msg.suggestionId, msg.to, msg.id).catch(reject('change the queue'))
+		case 'radioWhenEmpty':
+			return setWhenEmpty(user, msg.mode, msg.id).catch(reject('change what plays when the list runs out'))
 		case 'radio':
-			await applyRadio(msg.action === 'play' ? { action: 'play', videoId: msg.videoId } : { action: msg.action }, msg.id)
-				.catch((error) => rejectIntent(peer, 'update the radio', msg.id, error))
-			break
+			switch (msg.action) {
+				case 'ended':
+				case 'unplayable':
+					return playerReport(user, msg).catch((error) => console.error('[ws] player report failed:', error))
+				default:
+					return radioAction(user, msg, msg.id).catch(reject('update the radio'))
+			}
 	}
 }
 

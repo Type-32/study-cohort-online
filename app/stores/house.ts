@@ -1,26 +1,85 @@
 import { skipHydrate } from "pinia";
 import { PING_INTERVAL_MS } from "#shared/utils/realtime";
-import type { HouseState, Intent, ServerMsg } from "#shared/utils/realtime";
-import { nextRadio } from "#shared/utils/radio";
+import type { HouseState, Intent, PlayerReport, ServerMsg } from "#shared/utils/realtime";
+import { nextRadio, nextUp, queuePositionFor } from "#shared/utils/radio";
+import type { Suggestion } from "#shared/utils/radio";
 import { useAuthSession } from "~/composables/core/useAuthSession";
 
 /** How long a click may wait for the house to answer before it is given up. */
 const INTENT_TIMEOUT_MS = 10_000;
 
 type Pending = { id: string; intent: Intent; atServerMs: number; settle: (error?: Error) => void };
+type Me = { id: string; username: string } | undefined;
 
-/** What an intent does to the house, as the sender guesses it before the server answers. */
-function applyIntent(house: HouseState, { intent, atServerMs }: Pending, myId: string | undefined): HouseState {
+/** A random UUID (v4) for things this client creates, such as a suggestion. Works on plain http too, unlike `crypto.randomUUID`. */
+export function newId() {
+	const b = crypto.getRandomValues(new Uint8Array(16));
+	b[6] = (b[6]! & 0x0f) | 0x40;
+	b[8] = (b[8]! & 0x3f) | 0x80;
+	const hex = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/** A shelf track goes on air and leaves the shelf. */
+function playFromShelf(house: HouseState, suggestion: Suggestion, atServerMs: number): HouseState {
+	return {
+		...house,
+		suggestions: house.suggestions.filter((s) => s.id !== suggestion.id),
+		radio: nextRadio(null, { action: "play", videoId: suggestion.videoId, title: suggestion.title, by: suggestion.username }, atServerMs),
+	};
+}
+
+/**
+ * What an intent does to the house, as the sender guesses it before the server answers. Where the
+ * server knows more (a shuffle pick, a station number, a title), the guess leaves it out and the
+ * broadcast fills it in.
+ */
+function applyIntent(house: HouseState, { intent, atServerMs }: Pending, me: Me): HouseState {
 	switch (intent.t) {
 		case "door":
-			return { ...house, members: house.members.map((m) => (m.userId === myId ? { ...m, door: intent.state } : m)) };
+			return { ...house, members: house.members.map((m) => (m.userId === me?.id ? { ...m, door: intent.state } : m)) };
 		case "timer":
 			return {
 				...house,
 				timer: intent.action === "start" && intent.minutes ? { endsAtServerMs: atServerMs + intent.minutes * 60_000, minutes: intent.minutes } : null,
 			};
+		case "suggest": {
+			if (!me) return house;
+			const queuePosition = intent.queue ? queuePositionFor(house.suggestions, intent.suggestionId, "last") : null;
+			const suggestion = { id: intent.suggestionId, videoId: intent.videoId, title: null, userId: me.id, username: me.username, queuePosition, createdAtServerMs: atServerMs };
+			return { ...house, suggestions: [...house.suggestions, suggestion] };
+		}
+		case "unsuggest":
+			return { ...house, suggestions: house.suggestions.filter((s) => s.id !== intent.suggestionId) };
+		case "queue":
+			return {
+				...house,
+				suggestions: house.suggestions.map((s) =>
+					s.id === intent.suggestionId ? { ...s, queuePosition: queuePositionFor(house.suggestions, s.id, intent.to) } : s,
+				),
+			};
+		case "radioWhenEmpty":
+			return { ...house, radioWhenEmpty: intent.mode };
 		case "radio":
-			return { ...house, radio: nextRadio(house.radio, intent, atServerMs) };
+			switch (intent.action) {
+				case "play": {
+					const shelved = house.suggestions.find((s) => s.videoId === intent.videoId);
+					if (shelved) return playFromShelf(house, { ...shelved, username: me?.username ?? shelved.username }, atServerMs);
+					return { ...house, radio: nextRadio(null, { action: "play", videoId: intent.videoId, by: me?.username }, atServerMs) };
+				}
+				case "playSuggestion": {
+					const suggestion = house.suggestions.find((s) => s.id === intent.suggestionId);
+					return suggestion ? playFromShelf(house, suggestion, atServerMs) : house;
+				}
+				case "skip": {
+					const next = nextUp(house.suggestions);
+					if (next) return playFromShelf(house, next, atServerMs);
+					// A shuffle pick is the server's to make; until it answers, the radio stays as it is.
+					return house.radioWhenEmpty === "stop" ? { ...house, radio: null } : house;
+				}
+				default:
+					return { ...house, radio: nextRadio(house.radio, intent, atServerMs) };
+			}
 	}
 }
 
@@ -31,7 +90,7 @@ function applyIntent(house: HouseState, { intent, atServerMs }: Pending, myId: s
  */
 export const useHouseStore = defineStore("house", () => {
 	/** The house as the server last said it is. */
-	const confirmed = ref<HouseState>({ members: [], timer: null, radio: null });
+	const confirmed = ref<HouseState>({ members: [], timer: null, radio: null, suggestions: [], radioWhenEmpty: "stop" });
 	/** serverMs - clientMs, from the last ping/pong. Add to Date.now() to get server time. */
 	const clockOffsetMs = ref(0);
 	/** True once the first snapshot since `connect` arrived. */
@@ -40,6 +99,7 @@ export const useHouseStore = defineStore("house", () => {
 	const pending = shallowRef<Pending[]>([]);
 	const { user } = useAuthSession();
 	const myId = computed(() => user.value?.id);
+	const me = computed<Me>(() => (user.value ? { id: user.value.id, username: user.value.username } : undefined));
 	const toast = useToast();
 
 	/**
@@ -49,7 +109,7 @@ export const useHouseStore = defineStore("house", () => {
 	 * snapshot or rejoin doesn't reshuffle the list.
 	 */
 	const house = computed<HouseState>(() => {
-		const view = pending.value.reduce((state, entry) => applyIntent(state, entry, myId.value), confirmed.value);
+		const view = pending.value.reduce((state, entry) => applyIntent(state, entry, me.value), confirmed.value);
 		return { ...view, members: view.members.toSorted((a, b) => a.username.localeCompare(b.username)) };
 	});
 	/** This member's door; open until the snapshot says otherwise. */
@@ -112,6 +172,18 @@ export const useHouseStore = defineStore("house", () => {
 					confirmed.value.radio = msg.radio;
 					confirm(msg.intent);
 					break;
+				case "suggestion":
+					confirmed.value.suggestions = [...confirmed.value.suggestions.filter((s) => s.id !== msg.suggestion.id), msg.suggestion];
+					confirm(msg.intent);
+					break;
+				case "unsuggest":
+					confirmed.value.suggestions = confirmed.value.suggestions.filter((s) => s.id !== msg.suggestionId);
+					confirm(msg.intent);
+					break;
+				case "radioWhenEmpty":
+					confirmed.value.radioWhenEmpty = msg.mode;
+					confirm(msg.intent);
+					break;
 				case "error":
 					if (msg.intent) fail(msg.intent, new Error(msg.message));
 					else toast.add({ title: msg.message, color: "error", icon: "i-pixelarticons-alert" });
@@ -139,12 +211,17 @@ export const useHouseStore = defineStore("house", () => {
 		});
 	}
 
+	/** A player's report (track over, or refused by YouTube). Not an intent: nothing waits for an answer. */
+	function report(msg: PlayerReport) {
+		if (status.value === "OPEN") send(JSON.stringify(msg), false);
+	}
+
 	function connect() {
 		loaded.value = false;
 		open();
 	}
 
-	return { confirmed, clockOffsetMs, loaded, status: skipHydrate(status), house, myDoor, sendIntent, connect, disconnect: close };
+	return { confirmed, clockOffsetMs, loaded, status: skipHydrate(status), house, myDoor, sendIntent, report, connect, disconnect: close };
 });
 
 /**

@@ -78,6 +78,23 @@ const { mutate: revoke } = useMutation({
 		toastError(error, "Could not revoke the link");
 	},
 });
+
+const roleLabel = { admin: "Host", moderator: "Moderator · manages the radio", user: undefined } as const;
+
+// Optimistic: the role changes on click. If the server refuses, the list is reloaded.
+const { mutate: toggleModerator } = useMutation({
+	mutation: (member: User) =>
+		$fetch<User>(`/api/v1/users/${member.id}/${member.role === "moderator" ? "demote" : "promote"}` as string, { method: "PATCH" }),
+	onMutate(member) {
+		queryCache.cancelQueries({ key: ["users"] });
+		const role = member.role === "moderator" ? "user" : "moderator";
+		queryCache.setQueryData<User[]>(["users"], (list = []) => list.map((m) => (m.id === member.id ? { ...m, role } : m)));
+	},
+	onError(error) {
+		queryCache.invalidateQueries({ key: ["users"] });
+		toastError(error, "Could not change the role");
+	},
+});
 </script>
 
 <template>
@@ -126,17 +143,28 @@ const { mutate: revoke } = useMutation({
 				</div>
 				<ul v-else class="divide-y divide-default">
 					<li v-for="member in members" :key="member.id" class="flex items-center gap-3 py-2.5">
-						<UUser :name="member.username" :description="member.role === 'user' ? undefined : member.role" :avatar="{ alt: member.username }" class="flex-1" />
-						<UButton
-							v-if="member.id !== $as.user.value?.id"
-							label="Re-entry link"
-							icon="i-pixelarticons-key"
-							color="neutral"
-							variant="subtle"
-							size="sm"
-							:loading="reentry.isLoading.value && reentry.variables.value?.id === member.id"
-							@click="reentry.mutate(member)"
-						/>
+						<UUser :name="member.username" :description="roleLabel[member.role]" :avatar="{ alt: member.username }" class="flex-1" />
+						<template v-if="member.id !== $as.user.value?.id">
+							<UTooltip v-if="member.role !== 'admin'" :text="member.role === 'moderator' ? 'They stop managing the radio' : 'They can play, queue, skip and reorder the radio, like you'">
+								<UButton
+									:icon="member.role === 'moderator' ? 'i-pixelarticons-shield-off' : 'i-pixelarticons-shield'"
+									:aria-label="member.role === 'moderator' ? `Remove ${member.username} as moderator` : `Make ${member.username} a moderator`"
+									color="neutral"
+									variant="ghost"
+									size="sm"
+									@click="toggleModerator(member)"
+								/>
+							</UTooltip>
+							<UButton
+								label="Re-entry link"
+								icon="i-pixelarticons-key"
+								color="neutral"
+								variant="subtle"
+								size="sm"
+								:loading="reentry.isLoading.value && reentry.variables.value?.id === member.id"
+								@click="reentry.mutate(member)"
+							/>
+						</template>
 					</li>
 				</ul>
 			</div>

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { DEFAULT_DOOR_SOUND, doorSound, nextRadio, parseYouTubeId, radioPositionMs } from '../shared/utils/radio'
-import type { DoorSoundSettings } from '../shared/utils/radio'
+import { DEFAULT_DOOR_SOUND, doorSound, nextRadio, nextUp, parseYouTubeId, queuePositionFor, radioPositionMs, shelfOrder } from '../shared/utils/radio'
+import type { DoorSoundSettings, Suggestion } from '../shared/utils/radio'
 
 const ID = 'jfKfPfyJRdk'
 
@@ -21,6 +21,42 @@ test('no-op intents return the same state', () => {
 	expect(nextRadio(null, { action: 'pause' }, 5)).toBeNull()
 	const paused = nextRadio(playing, { action: 'pause' }, 5)
 	expect(nextRadio(paused, { action: 'pause' }, 9)).toBe(paused)
+})
+
+test('seek moves the position; a paused track stays paused at the new point', () => {
+	const playing = nextRadio(null, { action: 'play', videoId: ID }, 0)!
+	expect(radioPositionMs(nextRadio(playing, { action: 'seek', positionMs: 90_000 }, 10_000)!, 10_000)).toBe(90_000)
+
+	const paused = nextRadio(playing, { action: 'pause' }, 10_000)!
+	const moved = nextRadio(paused, { action: 'seek', positionMs: 5_000 }, 50_000)!
+	expect(moved.pausedAtServerMs).toBe(10_000)
+	expect(radioPositionMs(moved, 99_000)).toBe(5_000)
+	expect(radioPositionMs(nextRadio(moved, { action: 'resume' }, 60_000)!, 61_000)).toBe(6_000)
+
+	expect(radioPositionMs(nextRadio(playing, { action: 'seek', positionMs: -5 }, 7_000)!, 7_000)).toBe(0)
+	expect(nextRadio(null, { action: 'seek', positionMs: 1 }, 7)).toBeNull()
+})
+
+const shelf = (...rows: [id: string, queuePosition: number | null, createdAtServerMs: number][]): Suggestion[] =>
+	rows.map(([id, queuePosition, createdAtServerMs]) => ({ id, videoId: `${id}`.padEnd(11, '_'), title: id, userId: 'u', username: 'Mina', queuePosition, createdAtServerMs }))
+
+test('the queue plays first, in the host order; then suggestions, oldest first', () => {
+	const s = shelf(['new', null, 300], ['old', null, 100], ['q2', 5, 900], ['q1', -1, 950])
+	expect(shelfOrder(s).queued.map((x) => x.id)).toEqual(['q1', 'q2'])
+	expect(shelfOrder(s).waiting.map((x) => x.id)).toEqual(['old', 'new'])
+	expect(nextUp(s)?.id).toBe('q1')
+	expect(nextUp(shelf(['new', null, 300], ['old', null, 100]))?.id).toBe('old')
+	expect(nextUp([])).toBeUndefined()
+})
+
+test('queuePositionFor puts a track ahead of, behind, or out of the queue', () => {
+	const s = shelf(['a', 0, 1], ['b', 3, 2], ['c', null, 3])
+	expect(queuePositionFor(s, 'c', 'next')).toBe(-1)
+	expect(queuePositionFor(s, 'c', 'last')).toBe(4)
+	expect(queuePositionFor(s, 'a', 'off')).toBeNull()
+	// Moving the only queued track keeps it queued, and a track isn't measured against itself.
+	expect(queuePositionFor(shelf(['a', 7, 1]), 'a', 'next')).toBe(0)
+	expect(queuePositionFor(s, 'b', 'last')).toBe(1)
 })
 
 test('parseYouTubeId accepts the common link shapes and rejects the rest', () => {

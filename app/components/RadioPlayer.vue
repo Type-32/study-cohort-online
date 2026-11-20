@@ -5,10 +5,12 @@ import type { RadioPhase, RadioState } from "#shared/utils/radio";
 
 /**
  * The YouTube player for the shared radio. Client only. Each client plays locally and steers
- * toward the shared position, seeking only when it drifts past 2 seconds.
+ * toward the shared position, seeking only when it drifts past 2 seconds. It reports when the track
+ * is over or YouTube refuses it (once per track), so the house moves on, and its length (`null`
+ * for a live stream).
  */
 const props = defineProps<{ radio: NonNullable<RadioState>; clockOffsetMs: number; volume: number; muted: boolean }>();
-const emit = defineEmits<{ title: [title: string] }>();
+const emit = defineEmits<{ title: [title: string]; duration: [seconds: number | null]; report: [action: "ended" | "unplayable"] }>();
 /**
  * What the player shows. `tuning` until it first shows the house's real state for the current
  * video: playing, or paused/cued when the house is paused, or past the end, or an error. While
@@ -16,6 +18,8 @@ const emit = defineEmits<{ title: [title: string] }>();
  * radio that is about to start by itself.
  */
 const phase = defineModel<RadioPhase>("phase", { default: "tuning" });
+/** The screen is covered while tuning, after the track ends, and when YouTube refuses it. */
+const covered = computed(() => phase.value === "tuning" || phase.value === "ended" || phase.value === "unavailable");
 
 const el = useTemplateRef<HTMLDivElement>("el");
 let player: YT.Player | undefined;
@@ -23,6 +27,16 @@ let ready = false;
 let loadedId: string | undefined;
 /** When this client first asked a stalled player to play; reset once it plays or should not. */
 let playRequestedAt: number | undefined;
+/** The track this player last reported, so each player reports a track once. */
+let reported: string | undefined;
+let lastDuration: number | null | undefined;
+
+function reportOnce(action: "ended" | "unplayable") {
+	const track = `${props.radio.videoId}@${props.radio.startedAtServerMs}`;
+	if (reported === track) return;
+	reported = track;
+	emit("report", action);
+}
 /** The browser refused to start with sound, so the player runs muted until the user taps. */
 const autoMuted = ref(false);
 /** Why YouTube refused the current video, if it did. Cleared when the house picks another one. */
@@ -38,6 +52,7 @@ function sync() {
 
 	if (loadedId !== radio.videoId) {
 		loadedId = radio.videoId;
+		lastDuration = undefined;
 		error.value = undefined;
 		phase.value = "tuning";
 		const args = { videoId: radio.videoId, startSeconds: targetSeconds() };
@@ -56,6 +71,8 @@ function sync() {
 	const target = targetSeconds();
 	// A player that just finished may be a moment ahead of the house; don't replay the last seconds.
 	const ended = !live && duration > 0 && target >= duration - (state === ENDED ? 3 : 0);
+	const length = live ? null : duration > 0 ? duration : undefined;
+	if (length !== undefined && length !== lastDuration) emit("duration", (lastDuration = length));
 
 	// seekTo starts playback from cued/unstarted states, so only correct drift on a started video.
 	const started = state === PLAYING || state === BUFFERING || state === PAUSED;
@@ -64,7 +81,10 @@ function sync() {
 	if (paused || ended) {
 		if (state === PLAYING || state === BUFFERING) player.pauseVideo();
 		playRequestedAt = undefined;
-		if (ended) phase.value = "ended";
+		if (ended) {
+			phase.value = "ended";
+			if (!paused) reportOnce("ended");
+		}
 		return;
 	}
 	if (state === PLAYING || state === BUFFERING) {
@@ -132,10 +152,14 @@ onMounted(async () => {
 			onError(event) {
 				// 101 and 150: the owner disabled embedding. 100: removed or private. 2, 5: bad id or player error.
 				error.value = event.data === 101 || event.data === 150
-					? "This video's owner doesn't allow it to play outside YouTube. Try another link."
+					? "No signal here: this video's owner doesn't allow it outside YouTube."
 					: event.data === 100
-						? "This video is private or was removed. Try another link."
-						: "YouTube couldn't play this video. Try another link.";
+						? "No signal: this video is private or was removed."
+						: "No signal: YouTube couldn't play this video here.";
+				// The server moves on only once every member present reports a refusal: some refusals
+				// depend on the viewer (region, the page's address), so others may still be listening.
+				// 2 and 5 may be this browser only and aren't reported.
+				if (event.data === 100 || event.data === 101 || event.data === 150) reportOnce("unplayable");
 			},
 		},
 	});
@@ -153,36 +177,37 @@ onBeforeUnmount(() => player?.destroy());
 		     the radio's own buttons below control it for everyone. -->
 		<div class="relative aspect-video min-h-50 w-full overflow-hidden rounded-xl bg-black [&_iframe]:pointer-events-none">
 			<div ref="el" class="size-full" />
-			<AnimatePresence>
-				<Motion
-					v-if="phase === 'tuning' || phase === 'ended'"
-					:key="phase"
-					class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black p-6 text-center text-sm text-white/70"
-					role="status"
-					:initial="{ opacity: phase === 'tuning' ? 1 : 0 }"
-					:animate="{ opacity: 1 }"
-					:exit="{ opacity: 0 }"
-					:transition="{ duration: 0.4 }"
-				>
-					<template v-if="phase === 'tuning'">
-						<UIcon name="i-pixelarticons-loader" class="size-6 animate-spin" />
-						Tuning in…
-					</template>
-					<template v-else>
-						<UIcon name="i-pixelarticons-music" class="size-6" />
-						That track is over. Paste a link below to put on the next one.
-					</template>
-				</Motion>
-			</AnimatePresence>
+			<!-- Always rendered and faded with CSS: AnimatePresence left a faded-out "Tuning in…" in the
+			     page (and in the screen reader's live region) when the phase changed quickly. It also
+			     covers YouTube's own "Video unavailable" page with the reason, in the radio's words. -->
+			<div
+				class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black p-6 text-center text-sm text-balance text-white/70 transition-opacity duration-400"
+				:class="covered ? 'opacity-100' : 'pointer-events-none opacity-0'"
+				:role="covered ? 'status' : undefined"
+				:aria-hidden="!covered"
+			>
+				<template v-if="phase === 'unavailable'">
+					<UIcon name="i-pixelarticons-alert" class="size-6 text-error" />
+					{{ error }}
+				</template>
+				<template v-else-if="phase === 'ended'">
+					<UIcon name="i-pixelarticons-music" class="size-6" />
+					That track is over. Paste a link below for the next one.
+				</template>
+				<template v-else-if="phase === 'tuning'">
+					<UIcon name="i-pixelarticons-loader" class="size-6 animate-spin" />
+					Tuning in…
+				</template>
+			</div>
 		</div>
-		<UAlert v-if="error" :title="error" icon="i-pixelarticons-alert" color="error" variant="soft" />
 		<UButton
-			v-else-if="autoMuted && !muted"
+			v-if="autoMuted && !muted && !error"
 			label="Your browser muted the radio. Tap to listen."
 			icon="i-pixelarticons-volume-x"
 			color="warning"
 			variant="soft"
 			block
+			class="min-h-11"
 			@click="unmute"
 		/>
 	</div>

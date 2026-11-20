@@ -1,9 +1,7 @@
 import { db, schema } from '@nuxthub/db'
-import { eq } from 'drizzle-orm'
 import { publish } from '#server/utils/bus'
 import { presentMembers } from '#server/utils/presence'
-import { nextRadio } from '#shared/utils/radio'
-import type { RadioIntent, RadioState } from '#shared/utils/radio'
+import { loadShelf, radioOf } from '#server/utils/radioQueue'
 import type { HouseState, TimerState } from '#shared/utils/realtime'
 
 const { houseState } = schema
@@ -11,11 +9,6 @@ type HouseRow = typeof houseState.$inferSelect
 
 const timerOf = (row: HouseRow | undefined): TimerState =>
 	row?.timerEndsAt && row.timerMinutes ? { endsAtServerMs: row.timerEndsAt.getTime(), minutes: row.timerMinutes } : null
-
-const radioOf = (row: HouseRow | undefined): RadioState =>
-	row?.radioVideoId && row.radioStartedAt
-		? { videoId: row.radioVideoId, startedAtServerMs: row.radioStartedAt.getTime(), pausedAtServerMs: row.radioPausedAt?.getTime() ?? null }
-		: null
 
 /** Starts (`minutes`) or stops (`null`) the shared focus timer. The server never ticks; it ends on its own. */
 export async function setTimer(minutes: number | null, intent?: string) {
@@ -27,29 +20,7 @@ export async function setTimer(minutes: number | null, intent?: string) {
 	})
 }
 
-/**
- * Applies a radio intent under a row lock (pause and resume read the current state) and broadcasts
- * the result. An intent that changes nothing (pausing a paused radio) still broadcasts, so the
- * sender hears back about it.
- */
-export async function applyRadio(radioIntent: RadioIntent, intent?: string) {
-	await db.transaction(async (tx) => {
-		await tx.insert(houseState).values({ id: 1 }).onConflictDoNothing()
-		const [row] = await tx.select().from(houseState).where(eq(houseState.id, 1)).for('update')
-		const current = radioOf(row)
-		const next = nextRadio(current, radioIntent, Date.now())
-		if (next !== current) {
-			await tx.update(houseState).set({
-				radioVideoId: next?.videoId ?? null,
-				radioStartedAt: next && new Date(next.startedAtServerMs),
-				radioPausedAt: next?.pausedAtServerMs ? new Date(next.pausedAtServerMs) : null,
-			}).where(eq(houseState.id, 1))
-		}
-		await publish({ t: 'radio', radio: next, intent }, { tx })
-	})
-}
-
 export async function snapshot(): Promise<HouseState> {
-	const [members, row] = await Promise.all([presentMembers(), db.query.houseState.findFirst()])
-	return { members, timer: timerOf(row), radio: radioOf(row) }
+	const [members, row, suggestions] = await Promise.all([presentMembers(), db.query.houseState.findFirst(), loadShelf()])
+	return { members, timer: timerOf(row), radio: radioOf(row), suggestions, radioWhenEmpty: row?.radioWhenEmpty ?? 'stop' }
 }
