@@ -24,6 +24,10 @@ const props = defineProps<{
 	queueLength: number;
 	/** Set while the volume knob turns: the bottom line shows the volume instead. */
 	volume?: number;
+	/** The on-air station's frequency (`94.3 FM`), once the server has named the station. */
+	frequency?: string;
+	/** Set while the tuner browses: the station under the needle replaces the radio's own lines. */
+	browse?: { frequency: string; title: string | null; plays: number; lastPlayedAtServerMs: number; addedBy: string | null; status?: string };
 }>();
 
 type Line = { text: string; scroll?: boolean; blink?: boolean; lit?: boolean };
@@ -34,6 +38,16 @@ const time = computed(() =>
 const nextLine = computed(() => `Next ▸ ${props.next ?? (props.shuffleWhenEmpty ? "Shuffle" : "—")}`);
 
 const lines = computed<Line[]>(() => {
+	if (props.browse) {
+		const b = props.browse;
+		return [
+			{ text: `▸ ${b.frequency}`, lit: true },
+			{ text: b.title ?? "Untitled track", scroll: true },
+			{ text: `Played ${b.plays}× · ${formatTimeAgo(new Date(b.lastPlayedAtServerMs))}` },
+			...(b.addedBy ? [{ text: `First played by ${b.addedBy}` }] : []),
+			...(b.status ? [{ text: b.status }] : []),
+		];
+	}
 	const title = props.title ?? "Untitled track";
 	switch (props.state) {
 		case "connecting":
@@ -44,7 +58,7 @@ const lines = computed<Line[]>(() => {
 			return [{ text: "Tuning…", blink: true }, { text: title, scroll: true }];
 		case "playing":
 			return [
-				{ text: "● On air", lit: true },
+				{ text: props.frequency ? `● On air ${props.frequency}` : "● On air", lit: true },
 				{ text: title, scroll: true },
 				{ text: time.value },
 				{ text: props.by ? `Picked by ${props.by}` : "Shuffle" },
@@ -78,7 +92,7 @@ function measure() {
 	overflowPx.value = box ? Math.max(0, (box.firstElementChild?.scrollWidth ?? 0) - box.clientWidth) : 0;
 }
 useResizeObserver(() => titleBox.value?.[0], measure);
-watch(() => props.title, () => nextTick(measure));
+watch(() => lines.value.find((line) => line.scroll)?.text, () => nextTick(measure));
 </script>
 
 <template>

@@ -5,18 +5,18 @@
  * so the radio can show the value while it changes.
  */
 const model = defineModel<number>({ required: true });
-const props = withDefaults(defineProps<{ label: string; ariaLabel?: string; min?: number; max?: number; step?: number }>(), {
-	min: 0,
-	max: 100,
-	step: 1,
-});
+const props = withDefaults(
+	defineProps<{ label: string; ariaLabel?: string; valueText?: string; min?: number; max?: number; step?: number; wheelStep?: number; disabled?: boolean }>(),
+	{ min: 0, max: 100, step: 1, wheelStep: 5 },
+);
 const emit = defineEmits<{ turn: [value: number] }>();
 
 const input = useTemplateRef<HTMLInputElement>("input");
 /** -135° at the minimum to +135° at the maximum, like a real knob's sweep. */
-const angle = computed(() => -135 + ((model.value - props.min) / (props.max - props.min)) * 270);
+const angle = computed(() => -135 + (props.max > props.min ? ((model.value - props.min) / (props.max - props.min)) * 270 : 0));
 
 function set(value: number) {
+	if (props.disabled) return;
 	const next = Math.min(props.max, Math.max(props.min, Math.round(value / props.step) * props.step));
 	if (next === model.value) return;
 	model.value = next;
@@ -37,14 +37,15 @@ function up() {
 	drag = undefined;
 }
 function wheel(event: WheelEvent) {
-	set(model.value - Math.sign(event.deltaY) * props.step * 5);
+	set(model.value - Math.sign(event.deltaY) * props.step * props.wheelStep);
 }
 </script>
 
 <template>
-	<label class="group flex flex-col items-center gap-1 select-none">
+	<label class="group flex flex-col items-center gap-1 select-none" :class="disabled && 'opacity-50'">
 		<span
-			class="relative grid size-14 cursor-ns-resize touch-none place-items-center rounded-full bg-(--radio-key) shadow-[inset_0_-3px_0_var(--radio-trim)] ring-1 ring-(--radio-trim) group-has-[input:focus-visible]:ring-2 group-has-[input:focus-visible]:ring-primary"
+			class="relative grid size-14 touch-none place-items-center rounded-full bg-(--radio-key) shadow-[inset_0_-3px_0_var(--radio-trim)] ring-1 ring-(--radio-trim) group-has-[input:focus-visible]:ring-2 group-has-[input:focus-visible]:ring-primary"
+			:class="disabled ? 'cursor-not-allowed' : 'cursor-ns-resize'"
 			@pointerdown.prevent="down"
 			@pointermove="move"
 			@pointerup="up"
@@ -64,6 +65,8 @@ function wheel(event: WheelEvent) {
 			:step="step"
 			:value="model"
 			:aria-label="ariaLabel ?? label"
+			:aria-valuetext="valueText"
+			:disabled="disabled"
 			@input="set(Number(($event.target as HTMLInputElement).value))"
 		/>
 		<span class="text-[10px] tracking-widest text-muted uppercase">{{ label }}</span>

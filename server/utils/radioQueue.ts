@@ -4,7 +4,7 @@ import { publish } from '#server/utils/bus'
 import { presentMembers } from '#server/utils/presence'
 import { satisfies } from '#shared/utils/roles'
 import { SUGGESTION_LIMIT, nextRadio, nextUp, queuePositionFor } from '#shared/utils/radio'
-import type { RadioState, Suggestion, WhenEmpty } from '#shared/utils/radio'
+import type { RadioState, Station, Suggestion, WhenEmpty } from '#shared/utils/radio'
 import type { ServerMsg } from '#shared/utils/realtime'
 import type { User } from '#shared/types/db'
 
@@ -54,6 +54,35 @@ export async function loadShelf(tx: Pick<typeof db, 'select'> = db): Promise<Sug
 		.innerJoin(user, eq(user.id, radioSuggestion.userId))
 		.leftJoin(youtubeVideo, eq(youtubeVideo.videoId, radioSuggestion.videoId))
 	return rows.map(({ createdAt, ...rest }) => ({ ...rest, createdAtServerMs: createdAt.getTime() }))
+}
+
+/** The catalog, for the tuner: every track that has been on air, with its station. */
+export async function listStations(): Promise<Station[]> {
+	const rows = await db.select({
+		videoId: radioTrack.videoId,
+		title: youtubeVideo.title,
+		station: radioTrack.station,
+		plays: radioTrack.plays,
+		lastPlayedAt: radioTrack.lastPlayedAt,
+		addedBy: user.username,
+		unplayableAt: radioTrack.unplayableAt,
+	})
+		.from(radioTrack)
+		.leftJoin(youtubeVideo, eq(youtubeVideo.videoId, radioTrack.videoId))
+		.leftJoin(user, eq(user.id, radioTrack.addedBy))
+		.orderBy(radioTrack.station)
+	return rows.map(({ lastPlayedAt, unplayableAt, ...rest }) => ({ ...rest, lastPlayedAtServerMs: lastPlayedAt.getTime(), unplayable: !!unplayableAt }))
+}
+
+/**
+ * Takes a station off the dial (and out of the shuffle pool); the route checks the role. If the
+ * track goes on air again it gets a new station. The track on air can't be removed: skip it first.
+ */
+export async function removeStation(videoId: string) {
+	await inHouse(undefined, async (tx, row) => {
+		if (row.radioVideoId === videoId && !row.radioEndedAt) throw new HouseError("That one is on air. Skip it first, then remove it.")
+		await tx.delete(radioTrack).where(eq(radioTrack.videoId, videoId))
+	})
 }
 
 /**

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { SUGGESTION_LIMIT, doorSound, nextUp, parseYouTubeId, radioPositionMs } from "#shared/utils/radio";
-import type { RadioPhase, WhenEmpty } from "#shared/utils/radio";
+import { SUGGESTION_LIMIT, doorSound, formatFrequency, nextUp, parseYouTubeId, radioPositionMs, stationFrequency } from "#shared/utils/radio";
+import type { RadioPhase, Station, WhenEmpty } from "#shared/utils/radio";
+import type { Intent } from "#shared/utils/realtime";
 import { satisfies } from "#shared/utils/roles";
 import { useAuthSession } from "~/composables/core/useAuthSession";
 
@@ -113,13 +114,87 @@ useDoorBed(() => (onAir.value && !muted.value ? sound.value.bed : 0));
 const now = useNow({ interval: 1000 });
 const positionMs = computed(() => (radio.value ? radioPositionMs(radio.value, now.value.getTime() + clockOffsetMs.value) : 0));
 
-/** The host's link: on air now, or to the back of the queue. A member's link is a suggestion. */
+/** A track going on air now (host), to the back of the queue (host), or as a suggestion (member). */
+const trackIntent = (how: "play" | "queue" | "suggest", id: string): Intent =>
+	how === "play" ? { t: "radio", action: "play", videoId: id } : { t: "suggest", suggestionId: newId(), videoId: id, queue: how === "queue" };
+
 function submitLink(how: "play" | "queue" | "suggest") {
 	if (!videoId.value) return;
-	if (how === "play") sendLink({ t: "radio", action: "play", videoId: videoId.value });
-	else sendLink({ t: "suggest", suggestionId: newId(), videoId: videoId.value, queue: how === "queue" });
+	sendLink(trackIntent(how, videoId.value));
 	link.value = "";
 }
+
+// The tuner (step 10): every track the house has played is a station. Browsing is yours alone: it
+// sends nothing, and the needle goes back to the station on air after 10 s or on Escape.
+// Fetched once the socket is up (the request needs the browser's session), and again whenever a
+// track goes on air, so a new station and play counts show without a reload.
+// ponytail: the whole list per track change; send only the changed station if the catalog gets big.
+const { data: stationList, refetch: refetchStations } = useQuery({
+	key: ["radio-stations"],
+	query: () => $fetch<Station[]>("/api/v1/radio/stations"),
+	enabled: loaded,
+});
+watch(() => (radio.value?.station != null ? `${radio.value.station}:${radio.value.videoId}` : undefined), (key) => key && stationList.value && refetchStations());
+
+/** The dial's stations, in dial order (band, then frequency). */
+const dialStations = computed(() =>
+	(stationList.value ?? []).map((s) => ({ ...s, ...stationFrequency(s.station) })).sort((a, b) => a.band - b.band || a.mhz - b.mhz),
+);
+const browsing = ref<number | null>(null);
+const needleStation = computed(() => browsing.value ?? radio.value?.station ?? null);
+const needleBand = computed(() => (needleStation.value != null ? stationFrequency(needleStation.value).band : 1));
+const bandStations = computed(() => dialStations.value.filter((s) => s.band === needleBand.value));
+const mhzOnBand = (station: number | null | undefined) => {
+	if (station == null) return null;
+	const { band, mhz } = stationFrequency(station);
+	return band === needleBand.value ? mhz : null;
+};
+const browsed = computed(() => (browsing.value == null ? undefined : dialStations.value.find((s) => s.station === browsing.value)));
+const { start: holdNeedle } = useTimeoutFn(() => (browsing.value = null), 10_000, { immediate: false });
+function tuneTo(station: number) {
+	browsing.value = station;
+	holdNeedle();
+}
+onKeyStroke("Escape", () => (browsing.value = null));
+/** The tuning knob steps from station to station: its value is the needle's place in dial order. */
+const tunerIndex = computed({
+	get: () => Math.max(0, dialStations.value.findIndex((s) => s.station === needleStation.value)),
+	set: (index) => dialStations.value[index] && tuneTo(dialStations.value[index].station),
+});
+const tunerText = computed(() => {
+	const s = dialStations.value[tunerIndex.value];
+	return s ? `${formatFrequency(s.station)}, ${s.title ?? "Untitled track"}${s.videoId === onAirVideoId.value ? ", on air" : ""}` : "No stations yet";
+});
+
+/** The track on air, unless it's over (then the house moves on as soon as something is added). */
+const onAirVideoId = computed(() => (radio.value && phase.value !== "ended" ? radio.value.videoId : undefined));
+/** Why the browsed station can't be added, if it can't. */
+const addBlocked = computed(() => {
+	if (!browsed.value) return "Turn the tuning knob to a station first";
+	if (browsed.value.videoId === onAirVideoId.value) return "That one is on air right now";
+	if (house.value.suggestions.some((s) => s.videoId === browsed.value!.videoId)) return "That one is already on the shelf";
+	if (!isHost.value && suggestionsLeft.value <= 0) return `You have ${SUGGESTION_LIMIT} suggestions waiting`;
+});
+function addBrowsed(how: "play" | "queue" | "suggest") {
+	if (!browsed.value || addBlocked.value) return;
+	sendIntent(trackIntent(how, browsed.value.videoId));
+	// Played now, the needle is on air; added to the shelf, it stays to show that.
+	if (how === "play") browsing.value = null;
+	else holdNeedle();
+}
+const lcdBrowse = computed(() => {
+	const s = browsed.value;
+	if (!s) return undefined;
+	// The status line also says why the add key is disabled: a disabled key shows no tooltip.
+	const status = s.videoId === onAirVideoId.value
+		? "On air now"
+		: house.value.suggestions.some((x) => x.videoId === s.videoId)
+			? "On the shelf"
+			: !isHost.value && suggestionsLeft.value <= 0
+				? `${SUGGESTION_LIMIT} of ${SUGGESTION_LIMIT} suggestions waiting`
+				: s.unplayable ? "No signal last time" : undefined;
+	return { frequency: formatFrequency(s.station), title: s.title, plays: s.plays, lastPlayedAtServerMs: s.lastPlayedAtServerMs, addedBy: s.addedBy, status };
+});
 
 /** This player saw the track end, or YouTube refused it: tell the house, so it moves on. */
 function reportTrack(action: "ended" | "unplayable") {
@@ -145,6 +220,29 @@ const keyPress = { scale: 0.94, y: 1 };
 		<p class="sr-only">{{ [`${status}.`, byline && `${byline}.`, doorHint].filter(Boolean).join(" ") }}</p>
 
 		<div class="flex flex-col gap-3 rounded-(--radio-radius) bg-(--radio-body) p-3 ring-1 ring-(--radio-trim) sm:p-4">
+			<!-- The tuner's window and its keys. On phones the keys go under the dial. -->
+			<div class="flex flex-wrap items-center justify-end gap-2">
+				<RadioDial class="w-full sm:w-auto sm:min-w-0 sm:flex-1" :stations="bandStations" :needle="mhzOnBand(needleStation)" :on-air="mhzOnBand(radio?.station)" @tune="tuneTo" />
+				<template v-if="isHost">
+					<UTooltip :text="addBlocked ?? 'Play this station now, for everyone'">
+						<Motion as-child :while-press="keyPress">
+							<UButton icon="i-pixelarticons-play" aria-label="Play the station under the needle now" color="neutral" variant="ghost" :class="keyClass" :disabled="!!addBlocked" @click="addBrowsed('play')" />
+						</Motion>
+					</UTooltip>
+					<UTooltip :text="addBlocked ?? 'Add this station to the end of the queue'">
+						<Motion as-child :while-press="keyPress">
+							<UButton icon="i-pixelarticons-playlist" aria-label="Queue the station under the needle" color="neutral" variant="ghost" :class="keyClass" :disabled="!!addBlocked" @click="addBrowsed('queue')" />
+						</Motion>
+					</UTooltip>
+				</template>
+				<UTooltip v-else :text="addBlocked ?? `Suggest this station (${suggestionsLeft} of ${SUGGESTION_LIMIT} left)`">
+					<Motion as-child :while-press="keyPress">
+						<UButton icon="i-pixelarticons-plus" aria-label="Suggest the station under the needle" color="neutral" variant="ghost" :class="keyClass" :disabled="!!addBlocked" @click="addBrowsed('suggest')" />
+					</Motion>
+				</UTooltip>
+				<RadioStationList :stations="dialStations" :on-air-video-id="onAirVideoId" :can-remove="isHost" :key-class="keyClass" @choose="tuneTo" />
+			</div>
+
 			<!-- minmax(0, …): without it a column is at least as wide as its widest content: the LCD's
 			     title on wide screens, and on phones the player (200 px tall at 16:9 is 356 px wide),
 			     which then sticks out of the cabinet. -->
@@ -187,14 +285,29 @@ const keyPress = { scale: 0.94, y: 1 };
 						:door-sound="doorSoundNow"
 						:queue-length="house.suggestions.length"
 						:volume="volumeShown"
+						:frequency="radio?.station != null ? formatFrequency(radio.station) : undefined"
+						:browse="lcdBrowse"
 					/>
 					<div class="flex items-end justify-between gap-3">
 						<UTooltip text="Your volume (just you). Drag up or down, scroll, or use the arrow keys.">
 							<RadioKnob v-model="volume" label="Volume" aria-label="Volume, just you" @turn="turned" />
 						</UTooltip>
+						<UTooltip text="Tuning: browse the stations (just you). Drag, scroll, or use the arrow keys; Escape goes back to the station on air.">
+							<RadioKnob
+								v-model="tunerIndex"
+								label="Tuning"
+								aria-label="Tuning, browse the stations"
+								:value-text="tunerText"
+								:max="Math.max(0, dialStations.length - 1)"
+								:wheel-step="1"
+								:disabled="dialStations.length < 2"
+							/>
+						</UTooltip>
 						<!-- The grille moves while the radio is on air. It's decoration: the audio can't be read. -->
-						<div class="grille flex h-14 flex-1 items-center justify-center gap-1" :class="onAir && 'grille-on'" aria-hidden="true">
-							<span v-for="n in 12" :key="n" class="h-full w-1.5 rounded-full bg-(--radio-grille)" :style="{ animationDelay: `${(n * 137) % 900}ms` }" />
+						<!-- min-w-0, no gap, shrinkable bars: with two knobs the grille gets whatever room is left
+						     instead of pushing past the cabinet's edge. -->
+						<div class="grille flex h-14 min-w-0 flex-1 items-center justify-evenly overflow-hidden" :class="onAir && 'grille-on'" aria-hidden="true">
+							<span v-for="n in 12" :key="n" class="h-full w-1.5 min-w-0.5 rounded-full bg-(--radio-grille)" :style="{ animationDelay: `${(n * 137) % 900}ms` }" />
 						</div>
 					</div>
 				</div>
@@ -345,6 +458,7 @@ const keyPress = { scale: 0.94, y: 1 };
 	/* Primary's 700 in light mode: the default primary (500) on the pale LCD is too faint to read. */
 	--radio-lcd-fg: var(--ui-color-primary-700);
 	--radio-grille: var(--ui-border-accented);
+	--radio-needle: var(--ui-error);
 	--radio-radius: calc(var(--ui-radius) * 3);
 }
 :global(.dark) .radio {

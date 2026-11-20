@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { DEFAULT_DOOR_SOUND, doorSound, nextRadio, nextUp, parseYouTubeId, queuePositionFor, radioPositionMs, shelfOrder } from '../shared/utils/radio'
+import { DEFAULT_DOOR_SOUND, FM_MAX, FM_MIN, doorSound, formatFrequency, nextRadio, nextUp, parseYouTubeId, queuePositionFor, radioPositionMs, shelfOrder, stationFrequency } from '../shared/utils/radio'
 import type { DoorSoundSettings, Suggestion } from '../shared/utils/radio'
 
 const ID = 'jfKfPfyJRdk'
@@ -95,4 +95,15 @@ test('doorSound: open is untouched, quieter lowers, silent mutes, muffled adds a
 
 	// A stale or edited localStorage value falls back to the default instead of throwing.
 	expect(doorSound('closed', { ajar: 'quieter', closed: 'loud' } as unknown as DoorSoundSettings, 60)).toMatchObject({ muted: true })
+})
+
+test('206 stations get 206 different places on the band, spread from the start, and never move', () => {
+	const places = Array.from({ length: 206 }, (_, i) => stationFrequency(i + 1))
+	expect(new Set(places.map((p) => p.mhz)).size).toBe(206)
+	expect(places.every((p) => p.band === 1 && p.mhz >= FM_MIN && p.mhz <= FM_MAX && Math.round(p.mhz * 10) === p.mhz * 10)).toBe(true)
+	expect(places.slice(0, 4).map((p) => p.mhz)).toEqual([87.5, 100.3, 93.9, 106.7])
+	expect(stationFrequency(42)).toEqual(stationFrequency(42))
+	expect(stationFrequency(207)).toEqual({ band: 2, mhz: 87.5 })
+	expect(formatFrequency(2)).toBe('100.3 FM')
+	expect(formatFrequency(208)).toBe('100.3 FM2')
 })

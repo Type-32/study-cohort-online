@@ -77,6 +77,45 @@ export function formatTrackTime(ms: number) {
 	return s >= 3600 ? `${Math.floor(s / 3600)}:${mm.padStart(2, '0')}:${ss}` : `${mm}:${ss}`
 }
 
+/** A track that has been on air, as the tuner lists it (`GET /api/v1/radio/stations`). */
+export interface Station {
+	videoId: string
+	title: string | null
+	station: number
+	plays: number
+	lastPlayedAtServerMs: number
+	/** Who first put it on air; null for a member who has left. */
+	addedBy: string | null
+	/** YouTube refused it the last time it was on air. */
+	unplayable: boolean
+}
+
+/** The FM band: 87.5 to 108.0 MHz in steps of 0.1, 206 places. */
+export const FM_MIN = 87.5
+export const FM_MAX = 108
+const FM_PLACES = 206
+/**
+ * Places in the order stations get them: bit-reversed (0, 128, 64, 192, 32, …), skipping those past
+ * the band, so the first few stations spread across the dial instead of crowding its left edge.
+ */
+const PLACE_ORDER = Array.from({ length: 256 }, (_, i) => Number.parseInt(i.toString(2).padStart(8, '0').split('').reverse().join(''), 2))
+	.filter((place) => place < FM_PLACES)
+
+/**
+ * Where station `n` (1, 2, …; fixed per track) sits on the dial. The band fills after 206 stations;
+ * station 207 is the first on band 2 (`FM2`).
+ */
+export function stationFrequency(station: number) {
+	const index = station - 1
+	return { band: Math.floor(index / FM_PLACES) + 1, mhz: (FM_MIN * 10 + PLACE_ORDER[index % FM_PLACES]!) / 10 }
+}
+
+/** `94.3 FM`, or `94.3 FM2` on the second band. */
+export function formatFrequency(station: number) {
+	const { band, mhz } = stationFrequency(station)
+	return `${mhz.toFixed(1)} FM${band > 1 ? band : ''}`
+}
+
 /**
  * What a client's player shows for the house's radio. `tuning`: loading the track; `ended`: the
  * house's position is past the end of the track; `unavailable`: YouTube refused to play it here.

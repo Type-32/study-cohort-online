@@ -15,7 +15,7 @@ Steps 6 to 11 and 14 were added on Nov 19; the canvas and traces moved from 6 an
 | 7 | Door sound settings (quieter or muffled) | Done Nov 19; levels need a listen | Client only |
 | 8 | Suggestions and the queue | Done Nov 19 | Migration `0006` (applied) |
 | 9 | The radio as an object (LCD, keys, knob, shelf) | Done Nov 19 | Client only |
-| 10 | The tuner: a dial of every track played before | Planned | Steps 8 and 9 |
+| 10 | The tuner: a dial of every track played before | Done Nov 19 | No migration |
 | 11 | Notes (text chat) | Planned | Migration `0007` |
 | 12 | Canvas and theme packs | Planned | Skins the step 9 radio |
 | 13 | Traces | Design after the two-week test | |
@@ -530,7 +530,7 @@ Bugs found and fixed while building:
 
 Verified in a browser (`nuxt dev` on port 3001, throwaway UTF-8 Postgres): LCD lines for Off, Tuning, On air (`● ON AIR`, title, `0:04 / 3:33`, `PICKED BY WILSON`, `NEXT ▸ —`), Paused, Track over (`INSERT A LINK` with Stop and an empty shelf), No signal, and the bottom line (`DOOR AJAR · MUFFLED`, `Q 1`, `VOL ▮▮▮▮▮▮▯▯▯▯ 63` while the knob turns). Keyboard only: the knob's arrow keys changed the volume with a visible focus ring; Tab went progress bar → Pause → Skip → Turn off → Mute → Open on YouTube → Shuffle → Stop → link; Enter paused and resumed; typing a link and Space on "Add to the queue" queued it twice. Tooltips still show on the pressable keys. At desktop width and in a 390 px frame no part sticks out of the cabinet, and every radio button is at least 44 px. Light and dark colors read correctly. Reduced motion: the rules that stop the scrolling title, the blinking and the grille are in the page; the test browser can't emulate the preference, so they weren't seen switching. Screenshots of the whole radio couldn't be taken in this browser (they time out above its small window); the host's own screenshots were used for the overflow and the refusal.
 
-## Step 10: the tuner
+## Step 10: the tuner (done Nov 19)
 
 On an old radio the tuner is not a separate device. It is a lit window with a printed frequency scale and a needle, moved by a knob you twist. So it is added to the step 9 radio: the dial window along the top of the cabinet and a tuning knob beside the volume knob.
 
@@ -576,6 +576,38 @@ Every track that has been on air is a station with its own frequency. The statio
 - Files: `RadioDial.vue`. `RadioKnob.vue` is reused and `RadioLcd.vue` gains the browsing display.
 
 **Checks:** a track played twice keeps its station and counts 2 plays; the on-air LCD shows that station's frequency; browsing sends nothing to the server and changes nothing for a second tab; a member's add becomes a suggestion and is refused at 3; a track already on the shelf can't be added; the host's remove takes the tick off the dial; a new track appears on a second tab's dial without a reload; the dial works by keyboard only; signed out, the stations endpoint returns 401.
+
+### Built (Nov 19)
+
+Files: `RadioDial.vue` (the window), `RadioStationList.vue` (the searchable list in a modal, with the host's remove), `RadioKnob.vue` (gains `valueText` for `aria-valuetext`, `wheelStep`, `disabled`), `RadioLcd.vue` (browsing display, frequency on air), `HouseRadio.vue` (the tuner's state). Server: `listStations()` and `removeStation()` in `server/utils/radioQueue.ts`; routes `server/api/v1/radio/stations/index.get.ts` and `[videoId].delete.ts`. Shared: `Station`, `stationFrequency()`, `formatFrequency()` in `shared/utils/radio.ts`, with a unit test. No migration and no protocol change.
+
+Changed from the design above:
+
+- **Two add keys for the host** beside the dial, Play now and Queue, plus one Suggest key for a member, then the station list key. The layout has the keys beside the dial window, not beside the knobs: the knob row has no room for four controls and the grille. On phones the keys go under the dial.
+- **`NO STATIONS YET` is in the dial window**, not on the LCD: with no stations nothing has ever played, so the LCD says `OFF / INSERT A LINK`.
+- **The list refetches whenever a track goes on air**, not only when the station is unknown, so play counts stay right. `ponytail:` the whole list per track change; send only the changed station if the catalog gets big. Another tab sees a removal at its next track change or window focus.
+- **The LCD's status line** under a browsed station says `ON AIR NOW`, `ON THE SHELF`, `3 OF 3 SUGGESTIONS WAITING` or `NO SIGNAL LAST TIME`. It also explains a disabled add key, because a disabled key shows no tooltip.
+- **Removing the newest station frees its number**: station numbers are `max + 1`, so the next new track takes it (and its frequency). An older removed number is never reused. A counter that never goes back would need a migration; not worth it for a host-only edge.
+- **The on-air station can't be removed** (409, "That one is on air. Skip it first, then remove it."); its remove key is disabled. A track that's over can be.
+- **Signed out or banned: 401** on both routes; a member removing: 403.
+- **Bands**: the dial shows the band the needle is on; the knob steps through every station on every band in order. Nothing else of the band switch is built.
+
+Bugs found and fixed while building:
+
+- With the second knob the grille's 12 bars and fixed gaps couldn't shrink and stuck out past the cabinet (reported by the host with a screenshot). The grille is now `min-w-0` with shrinkable bars and no gap.
+- The station list kept its last search when reopened; choosing a row now clears it.
+
+Verified against a throwaway Postgres 18 (UTF-8) in `nuxt dev` on port 3001: 22 protocol checks, all passing. They cover every check above except the browser ones, plus a bad id (400), a removed station's replay (new row, 1 play), and an older removed number not being reused. 8 unit tests. In a browser, host on `localhost`, member on `[::1]`:
+
+- on air `● ON AIR 103.5 FM` for station 6, needle and marker at the same place;
+- with the keyboard only, the tuning knob's arrows moved the needle station to station, and the LCD showed `▸ 93.9 FM`, the title, `PLAYED 1× · JUST NOW`, `FIRST PLAYED BY WILSON`, `ON THE SHELF`; Escape and a 10 s wait both brought it back; no socket message was sent while browsing;
+- the host queued a station from the dial (`Q 3` → `Q 4`), the member suggested one and reached `3 OF 3 SUGGESTIONS WAITING` with Suggest disabled;
+- a new link played by the host put a 7th tick (`97.1 FM`) on the member's dial 0.3 s later, without a reload;
+- the station list searched by title (`funk`) and by frequency (`93.9`), choosing a row moved the needle, the on-air row's remove was disabled, and removing a station took the row and the tick away (server list `[1, 3, 5, 6, 7]`);
+- a click on the dial at 101.6 snapped to 103.5;
+- at 390 px the dial fills the width with 44 px keys under it, and nothing sticks out of the cabinet.
+
+Test-browser note: its shared pane sometimes stops running animation frames (0 frames a second while reporting `visible`). motion-v then never lifts the loading screen or fades the sections in. A fresh tab ran at 53 frames a second and lifted it in 7 s; this is the test browser, not the app.
 
 ## Step 11: notes (text chat)
 
