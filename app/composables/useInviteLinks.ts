@@ -21,10 +21,10 @@ export function useInviteLinks() {
 		toast.add({ title: "Link copied", description, color: "success", icon: "i-pixelarticons-clipboard-note" });
 	}
 
-	/** Without `userId`: a signup link. With it: a re-entry link for that member. Throws after toasting. */
-	async function createLink(userId?: string) {
+	/** Without `userId`: a signup link for `maxUses` people (one by default). With it: a re-entry link for that member. Throws after toasting. */
+	async function createLink(body: { userId?: string; maxUses?: number } = {}) {
 		try {
-			return await $fetch<Invite>("/api/v1/invites", { method: "POST", body: { userId } });
+			return await $fetch<Invite>("/api/v1/invites", { method: "POST", body });
 		} catch (error) {
 			toastError(error, "Could not create the link");
 			throw error;

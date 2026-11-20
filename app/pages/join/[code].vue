@@ -12,7 +12,9 @@ definePageMeta({
 });
 
 const code = useRoute().params.code as string;
-const { data: invite } = await useFetch<InviteInfo>(`/api/v1/invites/${encodeURIComponent(code)}`);
+const { data: invite, error } = await useFetch<InviteInfo>(`/api/v1/invites/${encodeURIComponent(code)}`);
+// The server says why: used up, expired, or unknown (revoked).
+const refusal = computed(() => fetchErrorMessage(error.value) ?? "It may be used up, expired, or revoked. Ask the host for a new one.");
 const schema = z.object({ username: usernameSchema });
 const toast = useToast();
 
@@ -55,7 +57,7 @@ async function join(username?: string) {
 			<UAuthForm
 				v-else
 				title="This invite link doesn't work"
-				description="It may be used up, expired, or revoked. Ask the host for a new one."
+				:description="refusal"
 				icon="i-pixelarticons-door-closed"
 			/>
 		</Motion>

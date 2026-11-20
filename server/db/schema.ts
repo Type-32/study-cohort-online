@@ -1,4 +1,5 @@
 import {bigserial, boolean, check, index, integer, pgTable, primaryKey, text, timestamp, uuid, varchar} from "drizzle-orm/pg-core";
+import type {AnyPgColumn} from "drizzle-orm/pg-core";
 import {relations, sql} from "drizzle-orm";
 
 const createdUpdatedAtColumns = {
@@ -22,6 +23,8 @@ export const user = pgTable("user", {
 	banned: boolean().notNull().default(false).$defaultFn(() => false),
 	banReason: text(),
 	banExpires: timestamp(),
+	/** The signup link that created this account; cleared when the link is removed. */
+	inviteCode: text().references((): AnyPgColumn => invite.code, { onDelete: "set null", onUpdate: "cascade" }),
 
 	...createdUpdatedAtColumns
 });
@@ -35,14 +38,17 @@ export const file = pgTable("file", {
 	...createdUpdatedAtColumns
 });
 
-// A signup link (`userId` null) creates accounts until `maxUses` or `expiresAt`.
+// A signup link (`userId` null) creates up to `maxUses` accounts (default one), until `expiresAt`.
 // A re-entry link (`userId` set) signs that member back in once, e.g. on a new device.
+// `usedUpAt` is set when the last use is taken. Used-up links, and links past `expiresAt`, are
+// deleted a day later (the next time the host's list is read).
 export const invite = pgTable("invite", {
 	code: text().primaryKey(),
 	createdBy: text().references(() => user.id, { onDelete: "set null", onUpdate: "cascade" }),
 	userId: text().references(() => user.id, { onDelete: "cascade", onUpdate: "cascade" }),
-	maxUses: integer(),
+	maxUses: integer().default(1).notNull(),
 	uses: integer().default(0).notNull(),
+	usedUpAt: timestamp({ withTimezone: true }),
 	expiresAt: timestamp({ withTimezone: true }),
 	createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
 });
@@ -74,8 +80,13 @@ export const memberState = pgTable("member_state", {
 
 // Relations
 
-export const userRelations = relations(user, ({ many }) => ({
+export const userRelations = relations(user, ({ many, one }) => ({
 	files: many(file),
+	invite: one(invite, {
+		fields: [user.inviteCode],
+		references: [invite.code],
+		relationName: "joinedThrough",
+	}),
 }))
 
 export const fileRelations = relations(file, ({ one }) => ({
@@ -85,9 +96,11 @@ export const fileRelations = relations(file, ({ one }) => ({
 	})
 }))
 
-export const inviteRelations = relations(invite, ({ one }) => ({
+export const inviteRelations = relations(invite, ({ one, many }) => ({
 	user: one(user, {
 		fields: [invite.userId],
 		references: [user.id],
-	})
+	}),
+	/** The accounts created through this signup link. */
+	joined: many(user, { relationName: "joinedThrough" }),
 }))

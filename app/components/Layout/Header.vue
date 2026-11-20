@@ -67,7 +67,7 @@ const menu = computed<DropdownMenuItem[][]>(() => [
 		label: "Sign in on another device",
 		icon: "i-pixelarticons-smartphone",
 		async onSelect() {
-			const invite = await createLink(user.value!.id);
+			const invite = await createLink({ userId: user.value!.id });
 			await copyLink(invite.code, "Open it on your other device. It works once, for 7 days.");
 		},
 	}],

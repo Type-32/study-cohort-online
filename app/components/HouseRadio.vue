@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { parseYouTubeId, radioPositionMs } from "#shared/utils/radio";
+import { doorSound, parseYouTubeId, radioPositionMs } from "#shared/utils/radio";
 import type { RadioPhase } from "#shared/utils/radio";
 
 const emit = defineEmits<{ settled: [] }>();
@@ -16,13 +16,18 @@ const title = ref<string>();
 const volume = useLocalStorage("house:radio-volume", 60, { initOnMounted: true });
 const muted = useLocalStorage("house:radio-muted", false, { initOnMounted: true });
 
-// Your door sets how much of the commons you hear: all of it, a quarter through an ajar door, none
-// through a closed one. The player keeps playing in sync either way, so opening the door is instant.
-const doorVolume = computed(() => Math.round(volume.value * (door.value === "ajar" ? 0.25 : 1)));
-const doorMuted = computed(() => muted.value || door.value === "closed");
-const doorHint = computed(() =>
-	door.value === "ajar" ? "Your door is ajar, so the radio is faint." : door.value === "closed" ? "Your door is closed, so you can't hear the radio." : undefined,
-);
+// Your door sets how much of the commons you hear, as you chose in the door's sound settings:
+// quieter, muffled (quieter with a rumble laid over it), or silent. The player keeps playing in sync
+// either way, so opening the door is instant.
+const doorSettings = useDoorSoundSettings();
+const sound = computed(() => doorSound(door.value, doorSettings.value, volume.value));
+const doorVolume = computed(() => sound.value.volume);
+const doorMuted = computed(() => muted.value || sound.value.muted);
+const doorHint = computed(() => {
+	if (door.value === "open") return;
+	const how = { quieter: door.value === "ajar" ? "the radio is faint" : "the radio is very faint", muffled: "the radio sounds muffled", silent: "you can't hear the radio" };
+	return `Your door is ${door.value}, so ${how[doorSettings.value[door.value]] ?? how.silent}.`;
+});
 
 const paused = computed(() => radio.value?.pausedAtServerMs != null);
 
@@ -47,6 +52,8 @@ const heading = computed(() => {
 	return phase.value === "tuning" ? "Tuning in…" : phase.value === "unavailable" ? "Can't play this one" : "Untitled track";
 });
 const onAir = computed(() => !!radio.value && phase.value === "playing");
+// The rumble plays only while the music does, and follows your mute.
+useDoorBed(() => (onAir.value && !muted.value ? sound.value.bed : 0));
 
 function play() {
 	if (!videoId.value) return;

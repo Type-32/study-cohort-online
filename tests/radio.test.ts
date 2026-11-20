@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
-import { nextRadio, parseYouTubeId, radioPositionMs } from '../shared/utils/radio'
+import { DEFAULT_DOOR_SOUND, doorSound, nextRadio, parseYouTubeId, radioPositionMs } from '../shared/utils/radio'
+import type { DoorSoundSettings } from '../shared/utils/radio'
 
 const ID = 'jfKfPfyJRdk'
 
@@ -37,4 +38,25 @@ test('parseYouTubeId accepts the common link shapes and rejects the rest', () =>
 
 	for (const bad of ['', 'hello', `https://vimeo.com/${ID}`, 'https://www.youtube.com/watch?v=short', 'https://youtu.be/'])
 		expect(parseYouTubeId(bad)).toBeUndefined()
+})
+
+test('doorSound: open is untouched, quieter lowers, silent mutes, muffled adds a bed that follows the slider', () => {
+	expect(doorSound('open', { ajar: 'muffled', closed: 'muffled' }, 60)).toEqual({ volume: 60, muted: false, bed: 0 })
+
+	// The defaults are the behaviour before the setting existed: ajar at a quarter, closed silent.
+	expect(doorSound('ajar', DEFAULT_DOOR_SOUND, 60)).toEqual({ volume: 15, muted: false, bed: 0 })
+	expect(doorSound('closed', DEFAULT_DOOR_SOUND, 60)).toMatchObject({ muted: true, bed: 0 })
+
+	const muffled = doorSound('ajar', { ajar: 'muffled', closed: 'silent' }, 100)
+	expect(muffled.volume).toBeLessThan(doorSound('ajar', DEFAULT_DOOR_SOUND, 100).volume)
+	expect(muffled.bed).toBeGreaterThan(0)
+	expect(doorSound('ajar', { ajar: 'muffled', closed: 'silent' }, 50).bed).toBeCloseTo(muffled.bed / 2)
+	expect(doorSound('ajar', { ajar: 'muffled', closed: 'silent' }, 0)).toMatchObject({ volume: 0, bed: 0 })
+
+	const closedQuieter = doorSound('closed', { ajar: 'quieter', closed: 'quieter' }, 100)
+	expect(closedQuieter.muted).toBe(false)
+	expect(closedQuieter.volume).toBeLessThan(doorSound('ajar', DEFAULT_DOOR_SOUND, 100).volume)
+
+	// A stale or edited localStorage value falls back to the default instead of throwing.
+	expect(doorSound('closed', { ajar: 'quieter', closed: 'loud' } as unknown as DoorSoundSettings, 60)).toMatchObject({ muted: true })
 })

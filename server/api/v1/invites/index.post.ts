@@ -3,7 +3,7 @@ import {useServerInvites} from "#server/utils/core/useServerInvites";
 
 const bodySchema = z.object({
 	userId: z.string().optional(),
-	maxUses: z.number().int().positive().optional(),
+	maxUses: z.number().int().min(1).max(50).optional(),
 	expiresAt: z.coerce.date().optional(),
 })
 

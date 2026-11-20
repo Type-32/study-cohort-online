@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { Door } from './realtime'
 
 /** A YouTube video id: 11 characters of [A-Za-z0-9_-]. */
 export const youtubeIdSchema = z.string().regex(/^[\w-]{11}$/)
@@ -22,6 +23,32 @@ export type RadioPhase = 'tuning' | 'playing' | 'paused' | 'ended' | 'unavailabl
 /** Playback position in ms at server time `serverNow`. */
 export function radioPositionMs(radio: NonNullable<RadioState>, serverNow: number) {
 	return (radio.pausedAtServerMs ?? serverNow) - radio.startedAtServerMs
+}
+
+/** How the radio sounds through a door that isn't open. Each listener picks; stored in their browser. */
+export type DoorSoundSettings = { ajar: 'quieter' | 'muffled'; closed: 'silent' | 'quieter' | 'muffled' }
+export const DEFAULT_DOOR_SOUND: DoorSoundSettings = { ajar: 'quieter', closed: 'silent' }
+
+/**
+ * Starting levels, to be tuned by ear. `music`: share of the listener's volume slider. `bed`: gain of
+ * the noise laid over the music for "muffled", at full slider. YouTube's audio can't be filtered, so
+ * muffled is the music turned down further with a low rumble masking its high end.
+ */
+export const DOOR_SOUND_LEVELS = {
+	ajar: { quieter: { music: 0.25, bed: 0 }, muffled: { music: 0.15, bed: 0.05 } },
+	closed: { silent: { music: 0, bed: 0 }, quieter: { music: 0.08, bed: 0 }, muffled: { music: 0.05, bed: 0.08 } },
+} as const
+
+/**
+ * What this listener hears of the radio through their door. `volume`: their slider, 0 to 100.
+ * Returns the player's volume (0 to 100), whether to mute it, and the noise bed's gain.
+ */
+export function doorSound(door: Door, settings: DoorSoundSettings, volume: number) {
+	if (door === 'open') return { volume, muted: false, bed: 0 }
+	const levels: Record<string, { music: number; bed: number }> = DOOR_SOUND_LEVELS[door]
+	// Settings come from localStorage; an unknown value falls back to the default.
+	const { music, bed } = levels[settings[door]] ?? levels[DEFAULT_DOOR_SOUND[door]]!
+	return { volume: Math.round(volume * music), muted: music === 0, bed: bed * (volume / 100) }
 }
 
 /**
