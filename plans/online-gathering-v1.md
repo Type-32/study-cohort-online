@@ -17,6 +17,7 @@ Steps 6 to 11 and 14 were added on Nov 19; the canvas and traces moved from 6 an
 | 9 | The radio as an object (LCD, keys, knob, shelf) | Done Nov 19 | Client only |
 | 10 | The tuner: a dial of every track played before | Done Nov 19 | No migration |
 | 11 | Notes (text chat) | Done Nov 20 | Migration `0007` (applied) |
+| 11b | Bands: YouTube playlists on the radio | Done Nov 22 | Migration `0008` (applied); `NUXT_YOUTUBE_API_KEY` |
 | 12 | Canvas and theme packs | Planned | Skins the step 9 radio |
 | 13 | Traces | Design after the two-week test | |
 | 14 | Voice | Spike first, after the two-week test | Media infrastructure outside Vercel |
@@ -652,6 +653,40 @@ Verified against a throwaway Postgres 18 (UTF-8) in `nuxt dev` on port 3001: 15 
 - opening the panel and sending a note both left the list at the bottom (checked by scroll position; an element screenshot resizes the page and scrolled it back up, a test artefact);
 - the member's button: `Notes, 4 new` with a count while idle, a dot during focus, nothing with the door closed (also after focus ended), the count back when the door opened, and nothing after reading;
 - a note backdated to 23:59:50 left the member's open list about 10 s later, without a reload.
+
+## Step 11b: bands (YouTube playlists on the radio) (done Nov 22)
+
+Asked for by the host on Nov 22: play playlists, and show them on the dial as a band (a strip of the scale), not a tick.
+
+Decided Nov 22 (host's choices):
+
+- **YouTube's Data API v3 on the server** lists a playlist's tracks and their titles up front. Key: `NUXT_YOUTUBE_API_KEY` (in `.env`; also needed on Vercel). The alternative was the adding member's browser reading the list through the YouTube player (no key, titles later).
+- **The band is drawn as a lit strip with a mark per track**, and the tuning knob steps through its tracks.
+
+How it works:
+
+- **A playlist link is a band**, including a watch link with `list=` (that's what the address bar holds while you're in a playlist). Mixes (`RD…`) aren't real playlists (the API can't list them) and fall back to the video. A bare playlist id needs a playlist prefix (`PL`, `OL`, `UU`, `FL`). `parseYouTubeLink()` replaces `parseYouTubeId()`.
+- **Tracks**: the public and unlisted ones, in order, up to 200 (`BAND_TRACK_LIMIT`); deleted and private placeholders are dropped. Cached in `youtube_playlist` and refetched when it's older than an hour and someone adds it. Their titles go to `youtube_video`. Cost: 1 quota unit per 50 tracks plus 1, out of 10,000 a day.
+- **On air**: the server sequences the band; the player still plays one video at a time. `RadioState.band` (`house_state.radioBand`, jsonb) holds the playlist, its title, the track index and the length. Skip and a track's end move to the band's next track; after the last one the shelf carries on. **Leave the band** (host key) skips its remaining tracks. A track YouTube refuses is skipped like any other once every present member's player has refused it.
+- **One station per band**: `radio_band`, numbered on the same dial as `radio_track` (`max + 1` over both, under the house row lock). A band's tracks don't become stations of their own, so a 50-track playlist doesn't use up 50 dial places. Playing a band again counts a play. Shuffle still picks single tracks only, so a long band can't take over a shuffle.
+- **The shelf**: a band is one cassette (one of a member's 3 suggestions), its cover the first track, tagged `BAND · n`. `radio_suggestion` holds a `videoId` or a `playlistId`, never both (check constraint). It starts from track 1.
+- **The dial**: `bandStrip()` draws a band as a strip 0.2 MHz a track (0.8 to 3.0 MHz) around its station's frequency, kept inside the scale, with a bright top edge and a mark per track. The first try, 0.1 MHz a track, read as a cluster of ticks. A strip may cover a neighbour's tick; the knob crosses a band as a block. In a band the LCD shows `▸ 93.9 FM · BAND`, the band's title, `TRACK 4/7 · <title>`, and `BAND ON AIR · TRACK 1` when another of its tracks is playing. On air it adds `BAND 1/7 · <title>`, and `NEXT ▸` is the band's next track.
+- **From the dial**, the host's Play now on a band's track starts the band there (also within the band on air: it jumps); Queue and Suggest add the whole band. The station list shows `BAND · n` and finds a band by any of its tracks' titles. Removing a band takes it off the dial; the one on air can't be removed.
+- `stationFrequency()` now returns `fm` (1 or 2, the scale), not `band`, so "band" means a playlist.
+
+Verified with the real API key against a throwaway Postgres 18 in `nuxt dev` on port 3001: 23 protocol checks, all passing.
+
+- **Playing and moving on:** "Uploads from YouTube" loaded 200 tracks in 0.7 to 0.9 s and went on air as station 2 after a single track's station 1. Skip and a player's "ended" moved to tracks 2 and 3, the same station, for both members.
+- **Refusals:** the band on air and a band already on the shelf were refused.
+- **Shelf:** an 8-item playlist suggested by a member became one cassette with 7 tracks, one placeholder dropped. Leaving the long band played that cassette from track 1 as station 3. Playing it from its last track and reporting that track's end left the band ("Track over").
+- **Dial and removal:**
+  - the stations list held both bands with their tracks' titles, numbered 1 to 3;
+  - a replayed band counted 2 plays;
+  - a new track took station 4;
+  - removing the band on air was refused (409), and removing another band worked (204).
+- **Errors and late joiners:** an unknown playlist was refused with "YouTube doesn't know that playlist", and a mix id by the schema. A late joiner's snapshot carried the band.
+- **Unit tests:** 10, including `parseYouTubeLink`, `bandStrip` and the API item filtering.
+- **In a browser:** the dial showed the band strip with 7 marks among the track ticks. The knob stepped into its track 4, where the LCD read `TRACK 4/7`, Play now was enabled (a jump within the band) and Queue disabled. A pasted `watch?v=…&list=…` link showed the band hint and became a `NEXT 1 · BAND · 11` cassette.
 
 ## Step 12: canvas and theme packs
 

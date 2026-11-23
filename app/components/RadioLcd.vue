@@ -26,8 +26,10 @@ const props = defineProps<{
 	volume?: number;
 	/** The on-air station's frequency (`94.3 FM`), once the server has named the station. */
 	frequency?: string;
-	/** Set while the tuner browses: the station under the needle replaces the radio's own lines. */
-	browse?: { frequency: string; title: string | null; plays: number; lastPlayedAtServerMs: number; addedBy: string | null; status?: string };
+	/** Set while a band (a playlist) is on air. */
+	band?: { title: string | null; index: number; length: number };
+	/** Set while the tuner browses: the station under the needle replaces the radio's own lines. `track`: a band's track under it. */
+	browse?: { frequency: string; title: string | null; track?: string; plays: number; lastPlayedAtServerMs: number; addedBy: string | null; status?: string };
 }>();
 
 type Line = { text: string; scroll?: boolean; blink?: boolean; lit?: boolean };
@@ -42,13 +44,15 @@ const lines = computed<Line[]>(() => {
 		const b = props.browse;
 		return [
 			{ text: `▸ ${b.frequency}`, lit: true },
-			{ text: b.title ?? "Untitled track", scroll: true },
+			{ text: b.title ?? (b.track ? "Untitled band" : "Untitled track"), scroll: true },
+			...(b.track ? [{ text: b.track }] : []),
 			{ text: `Played ${b.plays}× · ${formatTimeAgo(new Date(b.lastPlayedAtServerMs))}` },
 			...(b.addedBy ? [{ text: `First played by ${b.addedBy}` }] : []),
 			...(b.status ? [{ text: b.status }] : []),
 		];
 	}
 	const title = props.title ?? "Untitled track";
+	const bandLine = props.band ? [{ text: `Band ${props.band.index + 1}/${props.band.length} · ${props.band.title ?? "Untitled"}` }] : [];
 	switch (props.state) {
 		case "connecting":
 			return [{ text: "Connecting…" }];
@@ -60,12 +64,13 @@ const lines = computed<Line[]>(() => {
 			return [
 				{ text: props.frequency ? `● On air ${props.frequency}` : "● On air", lit: true },
 				{ text: title, scroll: true },
+				...bandLine,
 				{ text: time.value },
 				{ text: props.by ? `Picked by ${props.by}` : "Shuffle" },
 				{ text: nextLine.value },
 			];
 		case "paused":
-			return [{ text: "Paused" }, { text: title, scroll: true }, { text: time.value, blink: true }];
+			return [{ text: "Paused" }, { text: title, scroll: true }, ...bandLine, { text: time.value, blink: true }];
 		case "ended":
 			return [
 				{ text: "Track over" },

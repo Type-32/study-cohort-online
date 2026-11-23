@@ -133,12 +133,13 @@ export function formatFrequency(station: number) {
 }
 
 /**
- * A band on the dial: a strip around its station's frequency, 0.1 MHz a track (0.4 to 2.0), kept
- * inside the scale, with a mark per track. It may cover a neighbour's tick; the knob steps over the
- * band as a block, so it never interleaves the two.
+ * A band on the dial: a strip around its station's frequency, 0.2 MHz a track (0.8 to 3.0), kept
+ * inside the scale, with a mark per track. Wide enough to read as a strip and not a cluster of
+ * ticks. It may cover a neighbour's tick; the knob steps over the band as a block, so it never
+ * interleaves the two.
  */
 export function bandStrip(station: number, tracks: number) {
-	const width = Math.min(2, Math.max(0.4, tracks * 0.1))
+	const width = Math.min(3, Math.max(0.8, tracks * 0.2))
 	const from = Math.min(FM_MAX - width, Math.max(FM_MIN, stationFrequency(station).mhz - width / 2))
 	return { from, to: from + width, marks: Array.from({ length: tracks }, (_, i) => from + (width * (i + 0.5)) / tracks) }
 }

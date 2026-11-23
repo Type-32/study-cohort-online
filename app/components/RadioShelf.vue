@@ -43,15 +43,20 @@ const mine = (s: Suggestion) => s.userId === user.value?.id;
 				:transition="{ duration: 0.2 }"
 			>
 				<div class="relative">
-					<img :src="youtubeThumbnail(c.s.videoId)" alt="" loading="lazy" class="aspect-video w-full rounded-md bg-elevated object-cover" />
+					<!-- A band's cover is its first track; its badge says how many tracks it holds. -->
+					<img v-if="c.s.videoId ?? c.s.band?.cover" :src="youtubeThumbnail((c.s.videoId ?? c.s.band?.cover)!)" alt="" loading="lazy" class="aspect-video w-full rounded-md bg-elevated object-cover" />
+					<div v-else class="aspect-video w-full rounded-md bg-elevated" />
 					<span
 						class="absolute top-1 left-1 rounded px-1.5 py-0.5 font-mono text-[10px] tracking-wider uppercase"
 						:class="c.queued ? 'bg-primary text-inverted' : 'bg-default text-muted'"
 					>{{ c.label }}</span>
+					<span v-if="c.s.band" class="absolute right-1 bottom-1 rounded bg-default px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-highlighted uppercase">
+						Band{{ c.s.band.length ? ` · ${c.s.band.length}` : "" }}
+					</span>
 				</div>
-				<p class="line-clamp-2 min-h-8 text-xs text-highlighted" :title="c.s.title ?? undefined">{{ c.s.title ?? "Untitled track" }}</p>
+				<p class="line-clamp-2 min-h-8 text-xs text-highlighted" :title="c.s.title ?? undefined">{{ c.s.title ?? (c.s.band ? "Untitled band" : "Untitled track") }}</p>
 				<p class="truncate text-[11px] text-muted">
-					{{ mine(c.s) ? "From you" : `From ${c.s.username}` }}<template v-if="!c.s.title"> · may not play here</template>
+					{{ mine(c.s) ? "From you" : `From ${c.s.username}` }}<template v-if="!c.s.title && !c.s.band"> · may not play here</template>
 				</p>
 				<div v-if="isHost || mine(c.s)" class="flex items-center">
 					<template v-if="isHost">

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import { DEFAULT_DOOR_SOUND, FM_MAX, FM_MIN, bandStrip, doorSound, formatFrequency, nextRadio, nextUp, parseYouTubeLink, queuePositionFor, radioPositionMs, shelfOrder, stationFrequency } from '../shared/utils/radio'
 import type { DoorSoundSettings, Suggestion } from '../shared/utils/radio'
+import { playableItems } from '../server/utils/youtube'
 
 const ID = 'jfKfPfyJRdk'
 
@@ -112,14 +113,31 @@ test('206 stations get 206 different places on the scale, spread from the start,
 	expect(formatFrequency(208)).toBe('100.3 FM2')
 })
 
-test('bandStrip: a strip around the station, 0.1 MHz a track within 0.4 to 2.0, inside the scale, a mark per track', () => {
+test('bandStrip: a strip around the station, 0.2 MHz a track within 0.8 to 3.0, inside the scale, a mark per track', () => {
 	const mid = bandStrip(2, 8) // 100.3
-	expect(mid.from).toBeCloseTo(99.9)
-	expect(mid.to).toBeCloseTo(100.7)
+	expect(mid.from).toBeCloseTo(99.5)
+	expect(mid.to).toBeCloseTo(101.1)
 	expect(mid.marks).toHaveLength(8)
 	expect(mid.marks.every((m, i) => m > mid.from && m < mid.to && (i === 0 || m > mid.marks[i - 1]!))).toBe(true)
-	expect(bandStrip(2, 1).to - bandStrip(2, 1).from).toBeCloseTo(0.4)
-	expect(bandStrip(2, 200).to - bandStrip(2, 200).from).toBeCloseTo(2)
+	expect(bandStrip(2, 1).to - bandStrip(2, 1).from).toBeCloseTo(0.8)
+	expect(bandStrip(2, 200).to - bandStrip(2, 200).from).toBeCloseTo(3)
 	// Station 1 sits at 87.5, the scale's left end: the strip starts there instead of hanging off it.
 	expect(bandStrip(1, 10).from).toBe(FM_MIN)
+})
+
+test('playableItems keeps public and unlisted tracks in order, drops deleted and private placeholders', () => {
+	const item = (videoId: string | undefined, privacyStatus: string, title: string) => ({ snippet: { title, resourceId: { kind: 'youtube#video', videoId } }, status: { privacyStatus } })
+	const page = {
+		kind: 'youtube#playlistItemListResponse',
+		nextPageToken: 'CAUQAA',
+		items: [
+			item('aaaaaaaaaaa', 'public', 'One'),
+			item('bbbbbbbbbbb', 'privacyStatusUnspecified', 'Deleted video'),
+			item('ccccccccccc', 'private', 'Private video'),
+			item('ddddddddddd', 'unlisted', 'Four'),
+			item(undefined, 'public', 'No id'),
+		],
+	}
+	expect(playableItems(page)).toEqual([{ videoId: 'aaaaaaaaaaa', title: 'One' }, { videoId: 'ddddddddddd', title: 'Four' }])
+	expect(playableItems({})).toEqual([])
 })

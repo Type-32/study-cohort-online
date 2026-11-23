@@ -161,7 +161,7 @@ const stops = computed<Stop[]>(() =>
 	(stationList.value ?? [])
 		.map((station) => ({ station, ...stationFrequency(station.station) }))
 		.sort((a, b) => a.fm - b.fm || a.mhz - b.mhz)
-		.flatMap(({ station, fm, mhz }) =>
+		.flatMap(({ station, fm, mhz }): Stop[] =>
 			station.kind === "band" && station.tracks?.length
 				? bandStrip(station.station, station.tracks.length).marks.map((mark, track) => ({ station, fm, mhz: mark, track }))
 				: [{ station, fm, mhz, track: null }],
@@ -490,7 +490,7 @@ const keyPress = { scale: 0.94, y: 1 };
 					size="lg"
 					class="w-full"
 					aria-label="YouTube link or playlist"
-					aria-describedby="radio-link-hint"
+					:aria-describedby="linked?.kind === 'band' || !isHost ? 'radio-link-hint' : undefined"
 					:color="link && !linked ? 'error' : 'primary'"
 					:highlight="!!link && !linked"
 					:disabled="!isHost && suggestionsLeft <= 0"
