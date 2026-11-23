@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { DEFAULT_DOOR_SOUND, FM_MAX, FM_MIN, doorSound, formatFrequency, nextRadio, nextUp, parseYouTubeId, queuePositionFor, radioPositionMs, shelfOrder, stationFrequency } from '../shared/utils/radio'
+import { DEFAULT_DOOR_SOUND, FM_MAX, FM_MIN, bandStrip, doorSound, formatFrequency, nextRadio, nextUp, parseYouTubeLink, queuePositionFor, radioPositionMs, shelfOrder, stationFrequency } from '../shared/utils/radio'
 import type { DoorSoundSettings, Suggestion } from '../shared/utils/radio'
 
 const ID = 'jfKfPfyJRdk'
@@ -59,21 +59,25 @@ test('queuePositionFor puts a track ahead of, behind, or out of the queue', () =
 	expect(queuePositionFor(s, 'b', 'last')).toBe(1)
 })
 
-test('parseYouTubeId accepts the common link shapes and rejects the rest', () => {
+test('parseYouTubeLink: tracks from the common link shapes, bands from playlist links, nothing from the rest', () => {
 	for (const link of [
 		ID,
 		`https://www.youtube.com/watch?v=${ID}&t=42s`,
 		`youtube.com/watch?v=${ID}`,
 		`https://youtu.be/${ID}?si=abc`,
 		`https://m.youtube.com/watch?v=${ID}`,
-		`https://music.youtube.com/watch?v=${ID}&list=RD`,
+		`https://music.youtube.com/watch?v=${ID}&list=RDAMVM${ID}`,
 		`https://www.youtube.com/live/${ID}?feature=share`,
 		`https://youtube.com/shorts/${ID}`,
 		`https://www.youtube-nocookie.com/embed/${ID}`,
-	]) expect(parseYouTubeId(link)).toBe(ID)
+	]) expect(parseYouTubeLink(link)).toEqual({ kind: 'track', id: ID })
 
-	for (const bad of ['', 'hello', `https://vimeo.com/${ID}`, 'https://www.youtube.com/watch?v=short', 'https://youtu.be/'])
-		expect(parseYouTubeId(bad)).toBeUndefined()
+	const PL = 'PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG'
+	for (const link of [PL, `https://www.youtube.com/playlist?list=${PL}`, `https://www.youtube.com/watch?v=${ID}&list=${PL}&index=3`, `https://music.youtube.com/playlist?list=${PL}`])
+		expect(parseYouTubeLink(link)).toEqual({ kind: 'band', id: PL })
+
+	for (const bad of ['', 'hello', 'helloworldhello', `https://vimeo.com/${ID}`, 'https://www.youtube.com/watch?v=short', 'https://youtu.be/', 'https://www.youtube.com/playlist?list=WL'])
+		expect(parseYouTubeLink(bad)).toBeUndefined()
 })
 
 test('doorSound: open is untouched, quieter lowers, silent mutes, muffled adds a bed that follows the slider', () => {
@@ -97,13 +101,25 @@ test('doorSound: open is untouched, quieter lowers, silent mutes, muffled adds a
 	expect(doorSound('closed', { ajar: 'quieter', closed: 'loud' } as unknown as DoorSoundSettings, 60)).toMatchObject({ muted: true })
 })
 
-test('206 stations get 206 different places on the band, spread from the start, and never move', () => {
+test('206 stations get 206 different places on the scale, spread from the start, and never move', () => {
 	const places = Array.from({ length: 206 }, (_, i) => stationFrequency(i + 1))
 	expect(new Set(places.map((p) => p.mhz)).size).toBe(206)
-	expect(places.every((p) => p.band === 1 && p.mhz >= FM_MIN && p.mhz <= FM_MAX && Math.round(p.mhz * 10) === p.mhz * 10)).toBe(true)
+	expect(places.every((p) => p.fm === 1 && p.mhz >= FM_MIN && p.mhz <= FM_MAX && Math.round(p.mhz * 10) === p.mhz * 10)).toBe(true)
 	expect(places.slice(0, 4).map((p) => p.mhz)).toEqual([87.5, 100.3, 93.9, 106.7])
 	expect(stationFrequency(42)).toEqual(stationFrequency(42))
-	expect(stationFrequency(207)).toEqual({ band: 2, mhz: 87.5 })
+	expect(stationFrequency(207)).toEqual({ fm: 2, mhz: 87.5 })
 	expect(formatFrequency(2)).toBe('100.3 FM')
 	expect(formatFrequency(208)).toBe('100.3 FM2')
+})
+
+test('bandStrip: a strip around the station, 0.1 MHz a track within 0.4 to 2.0, inside the scale, a mark per track', () => {
+	const mid = bandStrip(2, 8) // 100.3
+	expect(mid.from).toBeCloseTo(99.9)
+	expect(mid.to).toBeCloseTo(100.7)
+	expect(mid.marks).toHaveLength(8)
+	expect(mid.marks.every((m, i) => m > mid.from && m < mid.to && (i === 0 || m > mid.marks[i - 1]!))).toBe(true)
+	expect(bandStrip(2, 1).to - bandStrip(2, 1).from).toBeCloseTo(0.4)
+	expect(bandStrip(2, 200).to - bandStrip(2, 200).from).toBeCloseTo(2)
+	// Station 1 sits at 87.5, the scale's left end: the strip starts there instead of hanging off it.
+	expect(bandStrip(1, 10).from).toBe(FM_MIN)
 })

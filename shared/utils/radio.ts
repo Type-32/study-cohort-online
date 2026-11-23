@@ -3,6 +3,11 @@ import type { Door } from './realtime'
 
 /** A YouTube video id: 11 characters of [A-Za-z0-9_-]. */
 export const youtubeIdSchema = z.string().regex(/^[\w-]{11}$/)
+/** A YouTube playlist id (`PL…`, `OLAK…`, `UU…`). Mixes (`RD…`) aren't real playlists: the API can't list them. */
+export const playlistIdSchema = z.string().regex(/^[\w-]{12,64}$/).refine((id) => !id.startsWith('RD'))
+
+/** A band: a playlist on air, played track after track. `index` is the track on air (0-based). */
+export type RadioBand = { id: string; title: string | null; index: number; length: number }
 
 /**
  * The shared radio. The server stores timestamps only; every client derives the position.
@@ -18,10 +23,12 @@ export type RadioState = {
 	by: string | null
 	/** Its station in the catalog; null in the sender's optimistic copy until the server answers. */
 	station: number | null
+	/** Set while a band (playlist) is on air; `videoId` is its track `index`. */
+	band: RadioBand | null
 } | null
 
 export type RadioIntent =
-	| { action: 'play'; videoId: string; title?: string | null; by?: string | null; station?: number | null }
+	| { action: 'play'; videoId: string; title?: string | null; by?: string | null; station?: number | null; band?: RadioBand | null }
 	| { action: 'pause' | 'resume' | 'stop' }
 	| { action: 'seek'; positionMs: number }
 
@@ -32,10 +39,15 @@ export const WHEN_EMPTY = ['shuffle', 'stop'] as const
 /** How many suggestions a member can have on the shelf at once (the host isn't limited). */
 export const SUGGESTION_LIMIT = 3
 
-/** A track on the shelf. `queuePosition` set: the host queued it (lowest plays first). Null: it waits as a suggestion. */
+/**
+ * A track or a band on the shelf. `queuePosition` set: the host queued it (lowest plays first).
+ * Null: it waits as a suggestion. A band has `band` set and no `videoId`.
+ */
 export interface Suggestion {
 	id: string
-	videoId: string
+	videoId: string | null
+	/** `cover`: its first track, for the thumbnail; null until the server answers. */
+	band: { id: string; length: number; cover: string | null } | null
 	title: string | null
 	userId: string
 	username: string
@@ -77,20 +89,24 @@ export function formatTrackTime(ms: number) {
 	return s >= 3600 ? `${Math.floor(s / 3600)}:${mm.padStart(2, '0')}:${ss}` : `${mm}:${ss}`
 }
 
-/** A track that has been on air, as the tuner lists it (`GET /api/v1/radio/stations`). */
+/** A station on the dial, as the tuner lists it (`GET /api/v1/radio/stations`): a track or a band. */
 export interface Station {
-	videoId: string
+	/** The video id, or the playlist id for a band. */
+	id: string
+	kind: 'track' | 'band'
 	title: string | null
 	station: number
 	plays: number
 	lastPlayedAtServerMs: number
 	/** Who first put it on air; null for a member who has left. */
 	addedBy: string | null
-	/** YouTube refused it the last time it was on air. */
+	/** YouTube refused it the last time it was on air (tracks only). */
 	unplayable: boolean
+	/** A band's tracks, in play order. */
+	tracks?: { videoId: string; title: string | null }[]
 }
 
-/** The FM band: 87.5 to 108.0 MHz in steps of 0.1, 206 places. */
+/** The FM scale: 87.5 to 108.0 MHz in steps of 0.1, 206 places. */
 export const FM_MIN = 87.5
 export const FM_MAX = 108
 const FM_PLACES = 206
@@ -102,18 +118,29 @@ const PLACE_ORDER = Array.from({ length: 256 }, (_, i) => Number.parseInt(i.toSt
 	.filter((place) => place < FM_PLACES)
 
 /**
- * Where station `n` (1, 2, …; fixed per track) sits on the dial. The band fills after 206 stations;
- * station 207 is the first on band 2 (`FM2`).
+ * Where station `n` (1, 2, …; fixed per track or band) sits on the dial. The scale fills after 206
+ * stations; station 207 is the first on the second scale (`fm: 2`, shown `FM2`).
  */
 export function stationFrequency(station: number) {
 	const index = station - 1
-	return { band: Math.floor(index / FM_PLACES) + 1, mhz: (FM_MIN * 10 + PLACE_ORDER[index % FM_PLACES]!) / 10 }
+	return { fm: Math.floor(index / FM_PLACES) + 1, mhz: (FM_MIN * 10 + PLACE_ORDER[index % FM_PLACES]!) / 10 }
 }
 
-/** `94.3 FM`, or `94.3 FM2` on the second band. */
+/** `94.3 FM`, or `94.3 FM2` on the second scale. */
 export function formatFrequency(station: number) {
-	const { band, mhz } = stationFrequency(station)
-	return `${mhz.toFixed(1)} FM${band > 1 ? band : ''}`
+	const { fm, mhz } = stationFrequency(station)
+	return `${mhz.toFixed(1)} FM${fm > 1 ? fm : ''}`
+}
+
+/**
+ * A band on the dial: a strip around its station's frequency, 0.1 MHz a track (0.4 to 2.0), kept
+ * inside the scale, with a mark per track. It may cover a neighbour's tick; the knob steps over the
+ * band as a block, so it never interleaves the two.
+ */
+export function bandStrip(station: number, tracks: number) {
+	const width = Math.min(2, Math.max(0.4, tracks * 0.1))
+	const from = Math.min(FM_MAX - width, Math.max(FM_MIN, stationFrequency(station).mhz - width / 2))
+	return { from, to: from + width, marks: Array.from({ length: tracks }, (_, i) => from + (width * (i + 0.5)) / tracks) }
 }
 
 /**
@@ -160,7 +187,7 @@ export function doorSound(door: Door, settings: DoorSoundSettings, volume: numbe
 export function nextRadio(current: RadioState, intent: RadioIntent, serverNow: number): RadioState {
 	switch (intent.action) {
 		case 'play':
-			return { videoId: intent.videoId, startedAtServerMs: serverNow, pausedAtServerMs: null, title: intent.title ?? null, by: intent.by ?? null, station: intent.station ?? null }
+			return { videoId: intent.videoId, startedAtServerMs: serverNow, pausedAtServerMs: null, title: intent.title ?? null, by: intent.by ?? null, station: intent.station ?? null, band: intent.band ?? null }
 		case 'pause':
 			return current && current.pausedAtServerMs === null ? { ...current, pausedAtServerMs: serverNow } : current
 		case 'resume':
@@ -176,10 +203,16 @@ export function nextRadio(current: RadioState, intent: RadioIntent, serverNow: n
 	}
 }
 
-/** Extracts the video id from a pasted YouTube link (watch, youtu.be, shorts, live, embed, music) or a bare id. */
-export function parseYouTubeId(input: string): string | undefined {
+/**
+ * What a pasted YouTube link (watch, youtu.be, shorts, live, embed, music, playlist) or bare id
+ * points at. A link with a playlist (`list=`) is the playlist, even from a watch page: that's what
+ * the address bar holds while you're in one. Mixes (`RD…`) fall back to the video.
+ */
+export function parseYouTubeLink(input: string): { kind: 'track' | 'band'; id: string } | undefined {
 	const text = input.trim()
-	if (youtubeIdSchema.safeParse(text).success) return text
+	if (youtubeIdSchema.safeParse(text).success) return { kind: 'track', id: text }
+	// A bare playlist id needs a playlist prefix, so a long word typed in isn't taken for one.
+	if (/^(PL|OL|UU|FL)/.test(text) && playlistIdSchema.safeParse(text).success) return { kind: 'band', id: text }
 	let url: URL
 	try {
 		url = new URL(text.includes('://') ? text : `https://${text}`)
@@ -187,10 +220,13 @@ export function parseYouTubeId(input: string): string | undefined {
 		return
 	}
 	const host = url.hostname.replace(/^(www|m|music)\./, '')
+	const youtube = host === 'youtube.com' || host === 'youtube-nocookie.com'
+	const list = url.searchParams.get('list')
+	if ((youtube || host === 'youtu.be') && list && playlistIdSchema.safeParse(list).success) return { kind: 'band', id: list }
 	const candidate = host === 'youtu.be'
 		? url.pathname.split('/')[1]
-		: host === 'youtube.com' || host === 'youtube-nocookie.com'
+		: youtube
 			? url.searchParams.get('v') ?? url.pathname.match(/^\/(?:shorts|live|embed)\/([^/?#]+)/)?.[1]
 			: undefined
-	return candidate && youtubeIdSchema.safeParse(candidate).success ? candidate : undefined
+	return candidate && youtubeIdSchema.safeParse(candidate).success ? { kind: 'track', id: candidate } : undefined
 }

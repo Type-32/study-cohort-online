@@ -1,6 +1,7 @@
-import {bigserial, boolean, check, index, integer, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar} from "drizzle-orm/pg-core";
+import {bigserial, boolean, check, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar} from "drizzle-orm/pg-core";
 import type {AnyPgColumn} from "drizzle-orm/pg-core";
 import {relations, sql} from "drizzle-orm";
+import type {RadioBand} from "#shared/utils/radio";
 
 const createdUpdatedAtColumns = {
 	createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
@@ -80,6 +81,8 @@ export const houseState = pgTable("house_state", {
 	radioUnplayableBy: text().array().default(sql`'{}'::text[]`).notNull(),
 	/** What plays when the queue and the suggestions run out (host's choice). */
 	radioWhenEmpty: text({ enum: ["shuffle", "stop"] }).default("stop").notNull(),
+	/** Set while a band (a playlist) is on air: which one, and which of its tracks is `radioVideoId`. */
+	radioBand: jsonb().$type<RadioBand>(),
 }, (t) => [check("house_state_single_row", sql`${t.id} = 1`)]);
 
 // What the server knows about a YouTube video, fetched once (oEmbed) and shared by suggestions,
@@ -90,16 +93,31 @@ export const youtubeVideo = pgTable("youtube_video", {
 	fetchedAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
 });
 
-// The shelf: tracks members suggested. `queuePosition` set means the host queued it (lowest plays
-// first); null means it waits as a suggestion (oldest plays first once the queue is empty). A row
-// is deleted when it plays, is withdrawn, or is removed. A video can be on the shelf once.
+// What the server knows about a YouTube playlist, from YouTube's Data API: its title and its
+// playable tracks in order (up to 200). Fetched again when it's older than an hour and someone adds it.
+export const youtubePlaylist = pgTable("youtube_playlist", {
+	playlistId: text().primaryKey(),
+	title: text(),
+	videoIds: text().array().notNull(),
+	fetchedAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
+});
+
+// The shelf: tracks and bands members suggested. `queuePosition` set means the host queued it (lowest
+// plays first); null means it waits as a suggestion (oldest plays first once the queue is empty). A
+// row is deleted when it plays, is withdrawn, or is removed. A video or a playlist can be on the shelf once.
 export const radioSuggestion = pgTable("radio_suggestion", {
 	id: uuid().primaryKey(),
 	userId: text().notNull().references(() => user.id, { onDelete: "cascade", onUpdate: "cascade" }),
-	videoId: text().notNull(),
+	videoId: text(),
+	playlistId: text().references(() => youtubePlaylist.playlistId, { onDelete: "cascade" }),
 	queuePosition: integer(),
 	createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
-}, (t) => [uniqueIndex().on(t.videoId), index().on(t.userId)]);
+}, (t) => [
+	uniqueIndex().on(t.videoId),
+	uniqueIndex().on(t.playlistId),
+	index().on(t.userId),
+	check("radio_suggestion_track_or_band", sql`(${t.videoId} is null) <> (${t.playlistId} is null)`),
+]);
 
 // The catalog: every track that has been on air, with its fixed station number (the tuner's dial,
 // step 10) and the pool shuffle picks from.
@@ -113,12 +131,32 @@ export const radioTrack = pgTable("radio_track", {
 	unplayableAt: timestamp({ withTimezone: true }),
 });
 
+// Bands on the dial: every playlist that has been on air, with its station number. Station numbers
+// are shared with `radio_track` (one dial); both are handed out under the house row lock. Its tracks
+// don't become stations of their own: they're marks inside the band.
+export const radioBand = pgTable("radio_band", {
+	playlistId: text().primaryKey().references(() => youtubePlaylist.playlistId, { onDelete: "cascade" }),
+	station: integer().notNull().unique(),
+	plays: integer().default(0).notNull(),
+	lastPlayedAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
+	addedBy: text().references(() => user.id, { onDelete: "set null", onUpdate: "cascade" }),
+});
+
 // Durable per-member state. A member with no row has their door open.
 export const memberState = pgTable("member_state", {
 	userId: text().primaryKey().references(() => user.id, { onDelete: "cascade", onUpdate: "cascade" }),
 	door: text({ enum: ["open", "ajar", "closed"] }).default("open").notNull(),
 	updatedAt: timestamp({ withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
+
+// Notes left on the table (step 11). Each is deleted 24 hours after it was sent: there's no
+// scheduler, so every insert deletes the older rows, and readers skip them until then.
+export const note = pgTable("note", {
+	id: uuid().primaryKey(),
+	userId: text().notNull().references(() => user.id, { onDelete: "cascade", onUpdate: "cascade" }),
+	text: text().notNull(),
+	createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
+}, (t) => [index().on(t.createdAt)]);
 
 // Relations
 

@@ -1,5 +1,5 @@
 import { skipHydrate } from "pinia";
-import { PING_INTERVAL_MS } from "#shared/utils/realtime";
+import { NOTE_TTL_MS, PING_INTERVAL_MS } from "#shared/utils/realtime";
 import type { HouseState, Intent, PlayerReport, ServerMsg } from "#shared/utils/realtime";
 import { nextRadio, nextUp, queuePositionFor } from "#shared/utils/radio";
 import type { Suggestion } from "#shared/utils/radio";
@@ -20,13 +20,21 @@ export function newId() {
 	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/** A shelf track goes on air and leaves the shelf. */
+/**
+ * A shelf item goes on air and leaves the shelf. A band's first track is the server's to name: until
+ * it answers, the radio stays as it is.
+ */
 function playFromShelf(house: HouseState, suggestion: Suggestion, atServerMs: number): HouseState {
-	return {
-		...house,
-		suggestions: house.suggestions.filter((s) => s.id !== suggestion.id),
-		radio: nextRadio(null, { action: "play", videoId: suggestion.videoId, title: suggestion.title, by: suggestion.username }, atServerMs),
-	};
+	const suggestions = house.suggestions.filter((s) => s.id !== suggestion.id);
+	if (!suggestion.videoId) return { ...house, suggestions };
+	return { ...house, suggestions, radio: nextRadio(null, { action: "play", videoId: suggestion.videoId, title: suggestion.title, by: suggestion.username }, atServerMs) };
+}
+
+/** Skip and leave: what follows on the shelf, or nothing (a shuffle pick is the server's to make). */
+function skipTo(house: HouseState, atServerMs: number): HouseState {
+	const next = nextUp(house.suggestions);
+	if (next) return playFromShelf(house, next, atServerMs);
+	return house.radioWhenEmpty === "stop" ? { ...house, radio: null } : house;
 }
 
 /**
@@ -46,7 +54,8 @@ function applyIntent(house: HouseState, { intent, atServerMs }: Pending, me: Me)
 		case "suggest": {
 			if (!me) return house;
 			const queuePosition = intent.queue ? queuePositionFor(house.suggestions, intent.suggestionId, "last") : null;
-			const suggestion = { id: intent.suggestionId, videoId: intent.videoId, title: null, userId: me.id, username: me.username, queuePosition, createdAtServerMs: atServerMs };
+			const band = intent.playlistId ? { id: intent.playlistId, length: 0, cover: null } : null;
+			const suggestion = { id: intent.suggestionId, videoId: intent.videoId ?? null, band, title: null, userId: me.id, username: me.username, queuePosition, createdAtServerMs: atServerMs };
 			return { ...house, suggestions: [...house.suggestions, suggestion] };
 		}
 		case "unsuggest":
@@ -60,6 +69,9 @@ function applyIntent(house: HouseState, { intent, atServerMs }: Pending, me: Me)
 			};
 		case "radioWhenEmpty":
 			return { ...house, radioWhenEmpty: intent.mode };
+		case "note":
+			if (!me) return house;
+			return { ...house, notes: [...house.notes, { id: intent.noteId, userId: me.id, username: me.username, text: intent.text, createdAtServerMs: atServerMs }] };
 		case "radio":
 			switch (intent.action) {
 				case "play": {
@@ -67,16 +79,19 @@ function applyIntent(house: HouseState, { intent, atServerMs }: Pending, me: Me)
 					if (shelved) return playFromShelf(house, { ...shelved, username: me?.username ?? shelved.username }, atServerMs);
 					return { ...house, radio: nextRadio(null, { action: "play", videoId: intent.videoId, by: me?.username }, atServerMs) };
 				}
+				case "playBand": {
+					// Its track and station are the server's to name; the band only leaves the shelf now.
+					return { ...house, suggestions: house.suggestions.filter((s) => s.band?.id !== intent.playlistId) };
+				}
 				case "playSuggestion": {
 					const suggestion = house.suggestions.find((s) => s.id === intent.suggestionId);
 					return suggestion ? playFromShelf(house, suggestion, atServerMs) : house;
 				}
-				case "skip": {
-					const next = nextUp(house.suggestions);
-					if (next) return playFromShelf(house, next, atServerMs);
-					// A shuffle pick is the server's to make; until it answers, the radio stays as it is.
-					return house.radioWhenEmpty === "stop" ? { ...house, radio: null } : house;
-				}
+				case "skip":
+					// Within a band the next track is the server's to name.
+					return house.radio?.band && house.radio.band.index + 1 < house.radio.band.length ? house : skipTo(house, atServerMs);
+				case "leaveBand":
+					return skipTo(house, atServerMs);
 				default:
 					return { ...house, radio: nextRadio(house.radio, intent, atServerMs) };
 			}
@@ -90,7 +105,7 @@ function applyIntent(house: HouseState, { intent, atServerMs }: Pending, me: Me)
  */
 export const useHouseStore = defineStore("house", () => {
 	/** The house as the server last said it is. */
-	const confirmed = ref<HouseState>({ members: [], timer: null, radio: null, suggestions: [], radioWhenEmpty: "stop" });
+	const confirmed = ref<HouseState>({ members: [], timer: null, radio: null, suggestions: [], radioWhenEmpty: "stop", notes: [] });
 	/** serverMs - clientMs, from the last ping/pong. Add to Date.now() to get server time. */
 	const clockOffsetMs = ref(0);
 	/** True once the first snapshot since `connect` arrived. */
@@ -184,6 +199,10 @@ export const useHouseStore = defineStore("house", () => {
 					confirmed.value.radioWhenEmpty = msg.mode;
 					confirm(msg.intent);
 					break;
+				case "note":
+					confirmed.value.notes = [...confirmed.value.notes.filter((n) => n.id !== msg.note.id), msg.note];
+					confirm(msg.intent);
+					break;
 				case "error":
 					if (msg.intent) fail(msg.intent, new Error(msg.message));
 					else toast.add({ title: msg.message, color: "error", icon: "i-pixelarticons-alert" });
@@ -191,6 +210,20 @@ export const useHouseStore = defineStore("house", () => {
 			}
 		},
 	});
+
+	// A note leaves every open list when it turns 24 hours old, on time even if nobody writes for
+	// days (the server deletes the row at the next note). Notes are oldest first: one timer, for the first.
+	if (import.meta.client) {
+		watchEffect((onCleanup) => {
+			const first = confirmed.value.notes[0];
+			if (!first) return;
+			const timeout = setTimeout(() => {
+				const cutoff = Date.now() + clockOffsetMs.value - NOTE_TTL_MS;
+				confirmed.value.notes = confirmed.value.notes.filter((n) => n.createdAtServerMs > cutoff);
+			}, Math.max(0, first.createdAtServerMs + NOTE_TTL_MS - (Date.now() + clockOffsetMs.value)) + 50);
+			onCleanup(() => clearTimeout(timeout));
+		});
+	}
 
 	/**
 	 * Sends an intent and shows its effect right away. Resolves when the house broadcasts it back

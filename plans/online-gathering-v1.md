@@ -16,7 +16,7 @@ Steps 6 to 11 and 14 were added on Nov 19; the canvas and traces moved from 6 an
 | 8 | Suggestions and the queue | Done Nov 19 | Migration `0006` (applied) |
 | 9 | The radio as an object (LCD, keys, knob, shelf) | Done Nov 19 | Client only |
 | 10 | The tuner: a dial of every track played before | Done Nov 19 | No migration |
-| 11 | Notes (text chat) | Planned | Migration `0007` |
+| 11 | Notes (text chat) | Done Nov 20 | Migration `0007` (applied) |
 | 12 | Canvas and theme packs | Planned | Skins the step 9 radio |
 | 13 | Traces | Design after the two-week test | |
 | 14 | Voice | Spike first, after the two-week test | Media infrastructure outside Vercel |
@@ -609,7 +609,7 @@ Verified against a throwaway Postgres 18 (UTF-8) in `nuxt dev` on port 3001: 22 
 
 Test-browser note: its shared pane sometimes stops running animation frames (0 frames a second while reporting `visible`). motion-v then never lifts the loading screen or fades the sections in. A fresh tab ran at 53 frames a second and lifted it in 7 s; this is the test browser, not the app.
 
-## Step 11: notes (text chat)
+## Step 11: notes (text chat) (done Nov 20)
 
 Not in the handoff. Its rules still apply: studying comes first, focus allows only one-tap gestures "such as sliding a note", and richer interaction belongs to breaks. So chat is notes left on the table, and it stays quiet. Notes come before the canvas because they only need the socket; in step 12 they become paper on the table (decided Nov 19).
 
@@ -630,6 +630,28 @@ Not in the handoff. Its rules still apply: studying comes first, focus allows on
 - In step 12 the notes become paper on the table. The data doesn't change.
 
 **Checks:** a note reaches the others and a late joiner's snapshot; 281 characters and an empty note are refused; a burst is limited; a note sent 24 hours ago (backdated in the test) is missing from the snapshot, drops off an open client's list without a reload, and its row is deleted by the next insert; markup shows as text; no badge behind a closed door.
+
+### Built (Nov 20)
+
+Files: `server/utils/notes.ts` (`recentNotes`, `sendNote`), the `note` table and migration `0007_notes` (applied to production Nov 20), the `note` intent in `server/api/ws.ts` (with the per-socket limit), `notes` in the snapshot (`server/utils/house.ts`), `Note` and the note constants in `shared/utils/realtime.ts`, the store (optimistic note, broadcast, the 24 h timer), and `app/components/HouseNotes.vue` (button and slideover) in the header's controls pill.
+
+Decisions made while building:
+
+- **Nuxt UI's chat components fit, used through their slots.** `UChatMessage` renders text parts by interpolation, so markup shows as text. Without a `status`, `UChatMessages` does none of its AI behaviour (scrolling a submitted message to the top, stretching it, the "thinking" indicator). Notes are rendered as `UChatMessage`s in its default slot: mine on the right (soft), others on the left with their initial and `name · time` above. Passing notes through the `messages` prop would spread their extra fields onto the DOM as attributes.
+- **Scrolling to the newest is instant**, after the slideover has finished opening and after you send. A smooth scroll stopped short when the list grew while it ran, and the list's own scroll on mount ran mid-animation. Someone else's note keeps the list at the bottom only if you were already there; otherwise the "Newest" button shows.
+- **A note on its way shows faded** until the house confirms it. If it's refused (too fast, or no answer), it goes back into the box.
+- **The limit is in memory per socket**: one note a second, refused with "One note a second. Try again in a moment." A note over 280 characters or blank fails the schema and gets no answer; the client never sends one (it trims, counts `n/280` and disables the send key).
+- **One timer per client** drops notes as they turn 24 hours old: it waits for the oldest. It re-arms when the list or the clock offset changes.
+- **Read marker**: `house:notes-read` in localStorage, the send time of the newest note seen with the panel open. A first visit counts the notes already on the table as new.
+- The button shows only where the house is loaded (the home page).
+
+Verified against a throwaway Postgres 18 (UTF-8) in `nuxt dev` on port 3001: 15 protocol checks, all passing. They cover every server-side check above, plus: the sender's note comes back trimmed with its intent; 280 characters accepted; the limit is per socket (the host isn't limited by a member's burst); the snapshot keeps the newest 50, oldest first; a backdated note stays in the table until the next insert. In a browser, host on `localhost`, member on `[::1]`:
+
+- a note `Hello <b>house</b> & <script>alert(1)</script>` showed as that text, with no element created;
+- a 280-character unbroken note wrapped inside its bubble;
+- opening the panel and sending a note both left the list at the bottom (checked by scroll position; an element screenshot resizes the page and scrolled it back up, a test artefact);
+- the member's button: `Notes, 4 new` with a count while idle, a dot during focus, nothing with the door closed (also after focus ended), the count back when the door opened, and nothing after reading;
+- a note backdated to 23:59:50 left the member's open list about 10 s later, without a reload.
 
 ## Step 12: canvas and theme packs
 

@@ -1,6 +1,7 @@
 import { db, schema } from '@nuxthub/db'
 import { publish } from '#server/utils/bus'
 import { presentMembers } from '#server/utils/presence'
+import { recentNotes } from '#server/utils/notes'
 import { loadShelf, radioOf } from '#server/utils/radioQueue'
 import type { HouseState, TimerState } from '#shared/utils/realtime'
 
@@ -21,6 +22,6 @@ export async function setTimer(minutes: number | null, intent?: string) {
 }
 
 export async function snapshot(): Promise<HouseState> {
-	const [members, row, suggestions] = await Promise.all([presentMembers(), db.query.houseState.findFirst(), loadShelf()])
-	return { members, timer: timerOf(row), radio: radioOf(row), suggestions, radioWhenEmpty: row?.radioWhenEmpty ?? 'stop' }
+	const [members, row, suggestions, notes] = await Promise.all([presentMembers(), db.query.houseState.findFirst(), loadShelf(), recentNotes()])
+	return { members, timer: timerOf(row), radio: radioOf(row), suggestions, radioWhenEmpty: row?.radioWhenEmpty ?? 'stop', notes }
 }

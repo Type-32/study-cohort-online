@@ -3,6 +3,7 @@ import { addPeer, removePeer } from '#server/utils/bus'
 import { connect, disconnect, setDoor, touch } from '#server/utils/presence'
 import { setTimer, snapshot } from '#server/utils/house'
 import { HouseError, playerReport, queue, radioAction, setWhenEmpty, suggest, unsuggest } from '#server/utils/radioQueue'
+import { sendNote } from '#server/utils/notes'
 import { useServerUsers } from '#server/utils/core/useServerUsers'
 import { clientMsgSchema } from '#shared/utils/realtime'
 import type { ServerMsg } from '#shared/utils/realtime'
@@ -71,6 +72,13 @@ async function handle(peer: Peer, message: Message) {
 			return queue(user, msg.suggestionId, msg.to, msg.id).catch(reject('change the queue'))
 		case 'radioWhenEmpty':
 			return setWhenEmpty(user, msg.mode, msg.id).catch(reject('change what plays when the list runs out'))
+		case 'note': {
+			// One note a second per socket. In memory: a socket lives on one instance.
+			const now = Date.now()
+			if (now - (lastNoteAt.get(peer.id) ?? 0) < 1000) return reject('leave your note')(new HouseError('One note a second. Try again in a moment.'))
+			lastNoteAt.set(peer.id, now)
+			return sendNote(user, msg, msg.id).catch(reject('leave your note'))
+		}
 		case 'radio':
 			switch (msg.action) {
 				case 'ended':
@@ -87,6 +95,8 @@ async function handle(peer: Peer, message: Message) {
  * made (the second one wins) and come back in that order (the client relies on it, see `confirm`).
  */
 const queues = new Map<string, Promise<void>>()
+/** When each socket last sent a note (the limit above). */
+const lastNoteAt = new Map<string, number>()
 
 export default defineWebSocketHandler({
 	async upgrade(request) {
@@ -113,6 +123,7 @@ export default defineWebSocketHandler({
 	},
 	async close(peer) {
 		queues.delete(peer.id)
+		lastNoteAt.delete(peer.id)
 		removePeer(peer)
 		const { user } = await getUserSession(peer)
 		if (user) await disconnect(peer.id, user.id)
