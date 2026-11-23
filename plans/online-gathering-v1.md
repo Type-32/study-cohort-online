@@ -16,8 +16,9 @@ Steps 6 to 11 and 14 were added on Nov 19; the canvas and traces moved from 6 an
 | 8 | Suggestions and the queue | Done Nov 19 | Migration `0006` (applied) |
 | 9 | The radio as an object (LCD, keys, knob, shelf) | Done Nov 19 | Client only |
 | 10 | The tuner: a dial of every track played before | Done Nov 19 | No migration |
-| 11 | Notes (text chat) | Planned | Migration `0007` |
-| 12 | Canvas and theme packs | Planned | Skins the step 9 radio |
+| 11 | Notes (text chat) | Done Nov 20 | Migration `0007` (applied) |
+| 11b | Bands: YouTube playlists on the radio | Done Nov 22 | Migration `0008` (applied); `NUXT_YOUTUBE_API_KEY` |
+| 12 | Canvas and theme packs | Done Nov 22 | Migration `0009` (applied); `S3_*` on Vercel for uploads |
 | 13 | Traces | Design after the two-week test | |
 | 14 | Voice | Spike first, after the two-week test | Media infrastructure outside Vercel |
 
@@ -609,7 +610,7 @@ Verified against a throwaway Postgres 18 (UTF-8) in `nuxt dev` on port 3001: 22 
 
 Test-browser note: its shared pane sometimes stops running animation frames (0 frames a second while reporting `visible`). motion-v then never lifts the loading screen or fades the sections in. A fresh tab ran at 53 frames a second and lifted it in 7 s; this is the test browser, not the app.
 
-## Step 11: notes (text chat)
+## Step 11: notes (text chat) (done Nov 20)
 
 Not in the handoff. Its rules still apply: studying comes first, focus allows only one-tap gestures "such as sliding a note", and richer interaction belongs to breaks. So chat is notes left on the table, and it stays quiet. Notes come before the canvas because they only need the socket; in step 12 they become paper on the table (decided Nov 19).
 
@@ -631,12 +632,153 @@ Not in the handoff. Its rules still apply: studying comes first, focus allows on
 
 **Checks:** a note reaches the others and a late joiner's snapshot; 281 characters and an empty note are refused; a burst is limited; a note sent 24 hours ago (backdated in the test) is missing from the snapshot, drops off an open client's list without a reload, and its row is deleted by the next insert; markup shows as text; no badge behind a closed door.
 
-## Step 12: canvas and theme packs
+### Built (Nov 20)
+
+Files: `server/utils/notes.ts` (`recentNotes`, `sendNote`), the `note` table and migration `0007_notes` (applied to production Nov 20), the `note` intent in `server/api/ws.ts` (with the per-socket limit), `notes` in the snapshot (`server/utils/house.ts`), `Note` and the note constants in `shared/utils/realtime.ts`, the store (optimistic note, broadcast, the 24 h timer), and `app/components/HouseNotes.vue` (button and slideover) in the header's controls pill.
+
+Decisions made while building:
+
+- **Nuxt UI's chat components fit, used through their slots.** `UChatMessage` renders text parts by interpolation, so markup shows as text. Without a `status`, `UChatMessages` does none of its AI behaviour (scrolling a submitted message to the top, stretching it, the "thinking" indicator). Notes are rendered as `UChatMessage`s in its default slot: mine on the right (soft), others on the left with their initial and `name · time` above. Passing notes through the `messages` prop would spread their extra fields onto the DOM as attributes.
+- **Scrolling to the newest is instant**, after the slideover has finished opening and after you send. A smooth scroll stopped short when the list grew while it ran, and the list's own scroll on mount ran mid-animation. Someone else's note keeps the list at the bottom only if you were already there; otherwise the "Newest" button shows.
+- **A note on its way shows faded** until the house confirms it. If it's refused (too fast, or no answer), it goes back into the box.
+- **The limit is in memory per socket**: one note a second, refused with "One note a second. Try again in a moment." A note over 280 characters or blank fails the schema and gets no answer; the client never sends one (it trims, counts `n/280` and disables the send key).
+- **One timer per client** drops notes as they turn 24 hours old: it waits for the oldest. It re-arms when the list or the clock offset changes.
+- **Read marker**: `house:notes-read` in localStorage, the send time of the newest note seen with the panel open. A first visit counts the notes already on the table as new.
+- The button shows only where the house is loaded (the home page).
+
+Verified against a throwaway Postgres 18 (UTF-8) in `nuxt dev` on port 3001: 15 protocol checks, all passing. They cover every server-side check above, plus: the sender's note comes back trimmed with its intent; 280 characters accepted; the limit is per socket (the host isn't limited by a member's burst); the snapshot keeps the newest 50, oldest first; a backdated note stays in the table until the next insert. In a browser, host on `localhost`, member on `[::1]`:
+
+- a note `Hello <b>house</b> & <script>alert(1)</script>` showed as that text, with no element created;
+- a 280-character unbroken note wrapped inside its bubble;
+- opening the panel and sending a note both left the list at the bottom (checked by scroll position; an element screenshot resizes the page and scrolled it back up, a test artefact);
+- the member's button: `Notes, 4 new` with a count while idle, a dot during focus, nothing with the door closed (also after focus ended), the count back when the door opened, and nothing after reading;
+- a note backdated to 23:59:50 left the member's open list about 10 s later, without a reload.
+
+## Step 11b: bands (YouTube playlists on the radio) (done Nov 22)
+
+Asked for by the host on Nov 22: play playlists, and show them on the dial as a band (a strip of the scale), not a tick.
+
+Decided Nov 22 (host's choices):
+
+- **YouTube's Data API v3 on the server** lists a playlist's tracks and their titles up front. Key: `NUXT_YOUTUBE_API_KEY` (in `.env`; also needed on Vercel). The alternative was the adding member's browser reading the list through the YouTube player (no key, titles later).
+- **The band is drawn as a lit strip with a mark per track**, and the tuning knob steps through its tracks.
+
+How it works:
+
+- **A playlist link is a band**, including a watch link with `list=` (that's what the address bar holds while you're in a playlist). Mixes (`RD…`) aren't real playlists (the API can't list them) and fall back to the video. A bare playlist id needs a playlist prefix (`PL`, `OL`, `UU`, `FL`). `parseYouTubeLink()` replaces `parseYouTubeId()`.
+- **Tracks**: the public and unlisted ones, in order, up to 200 (`BAND_TRACK_LIMIT`); deleted and private placeholders are dropped. Cached in `youtube_playlist` and refetched when it's older than an hour and someone adds it. Their titles go to `youtube_video`. Cost: 1 quota unit per 50 tracks plus 1, out of 10,000 a day.
+- **On air**: the server sequences the band; the player still plays one video at a time. `RadioState.band` (`house_state.radioBand`, jsonb) holds the playlist, its title, the track index and the length. Skip and a track's end move to the band's next track; after the last one the shelf carries on. **Leave the band** (host key) skips its remaining tracks. A track YouTube refuses is skipped like any other once every present member's player has refused it.
+- **One station per band**: `radio_band`, numbered on the same dial as `radio_track` (`max + 1` over both, under the house row lock). A band's tracks don't become stations of their own, so a 50-track playlist doesn't use up 50 dial places. Playing a band again counts a play. Shuffle still picks single tracks only, so a long band can't take over a shuffle.
+- **The shelf**: a band is one cassette (one of a member's 3 suggestions), its cover the first track, tagged `BAND · n`. `radio_suggestion` holds a `videoId` or a `playlistId`, never both (check constraint). It starts from track 1.
+- **The dial**: `bandStrip()` draws a band as a strip 0.2 MHz a track (0.8 to 3.0 MHz) around its station's frequency, kept inside the scale, with a bright top edge and a mark per track. The first try, 0.1 MHz a track, read as a cluster of ticks. A strip may cover a neighbour's tick; the knob crosses a band as a block. In a band the LCD shows `▸ 93.9 FM · BAND`, the band's title, `TRACK 4/7 · <title>`, and `BAND ON AIR · TRACK 1` when another of its tracks is playing. On air it adds `BAND 1/7 · <title>`, and `NEXT ▸` is the band's next track.
+- **From the dial**, the host's Play now on a band's track starts the band there (also within the band on air: it jumps); Queue and Suggest add the whole band. The station list shows `BAND · n` and finds a band by any of its tracks' titles. Removing a band takes it off the dial; the one on air can't be removed.
+- `stationFrequency()` now returns `fm` (1 or 2, the scale), not `band`, so "band" means a playlist.
+
+Verified with the real API key against a throwaway Postgres 18 in `nuxt dev` on port 3001: 23 protocol checks, all passing.
+
+- **Playing and moving on:** "Uploads from YouTube" loaded 200 tracks in 0.7 to 0.9 s and went on air as station 2 after a single track's station 1. Skip and a player's "ended" moved to tracks 2 and 3, the same station, for both members.
+- **Refusals:** the band on air and a band already on the shelf were refused.
+- **Shelf:** an 8-item playlist suggested by a member became one cassette with 7 tracks, one placeholder dropped. Leaving the long band played that cassette from track 1 as station 3. Playing it from its last track and reporting that track's end left the band ("Track over").
+- **Dial and removal:**
+  - the stations list held both bands with their tracks' titles, numbered 1 to 3;
+  - a replayed band counted 2 plays;
+  - a new track took station 4;
+  - removing the band on air was refused (409), and removing another band worked (204).
+- **Errors and late joiners:** an unknown playlist was refused with "YouTube doesn't know that playlist", and a mix id by the schema. A late joiner's snapshot carried the band.
+- **Unit tests:** 10, including `parseYouTubeLink`, `bandStrip` and the API item filtering.
+- **In a browser:** the dial showed the band strip with 7 marks among the track ticks. The knob stepped into its track 4, where the LCD read `TRACK 4/7`, Play now was enabled (a jump within the band) and Queue disabled. A pasted `watch?v=…&list=…` link showed the band hint and became a `NEXT 1 · BAND · 11` cassette.
+
+## Step 12: canvas and theme packs (done Nov 22)
 
 - Add `pixi.js`. A client-only component draws the scene from a theme-pack JSON (backdrop, slots, object sprites) stored in S4.
 - The step 9 radio (which contains the YouTube iframe) is positioned over the canvas at the theme's radio slot and skinned by the theme pack (`radio: { slot, skin, frame? }`). Nuxt UI panels sit above.
 - Seats (moved from step 5): `member_state.slot` and `{ t: 'sit'; slot }`, publishing `member`. Slot ids come from the theme pack; the server rejects a slot the theme doesn't have.
 - First real use of the blob driver. MEGA S4's path-style support was confirmed in step 0.
+
+### Built (Nov 22)
+
+Decided Nov 22 (host's choices):
+
+- **Layout:** on wide screens the room is the page. The scene fills the window, the radio cabinet stands at the theme's radio slot, and the timer and the door controls float in a panel at the theme's panel spot. On phones the scene is a band at the top and the page stacks below it as before.
+- **Art:** I drew a first theme, "Living room", as flat SVG.
+- **Packs:** theme packs are uploaded by the host as a .zip and stored in blob storage (MEGA S4 in production).
+
+**The theme pack format** (`format: 1`, schema `themePackSchema` in `shared/utils/theme.ts`). A `theme.json` and the images it names, all in one folder; in a .zip, at the root or in one folder. Positions are in the pack's design units (`size`), and the scene keeps that shape, fits the window and fills the rest with `background`.
+
+| Field | What it is |
+| --- | --- |
+| `format`, `id`, `name` | `1`; an id like `cabin` (`a-z0-9-`); a display name |
+| `size` | `{ width, height }`: the design space (640–4096 by 360–4096) |
+| `background` | A colour (`#rrggbb`) around the scene |
+| `backdrop` | An image drawn at 0,0 over the whole design space |
+| `objects` | `[{ id, src, x, y, width, height, z? }]`: furniture, drawn in order of `z` |
+| `seats` | `[{ id, x, y }]`: where avatars sit (their centre); 1–60, unique ids |
+| `avatar` | `{ size, color }`: avatars are a circle with an initial |
+| `nooks` | `{ x, y, width, height, door, light, label }`: the rect members' doors stand in (one door per member present, bottom-aligned, sized to fit, name above), the door image, the lamp/door-light colour and the name colour |
+| `radio` | `{ slot: { x, y, width, height }, skin? }`: where the cabinet stands (at least 420 wide; it sits on the slot's bottom edge and scrolls if taller), and its colours per colour mode: `skin: { light?, dark?, radius? }` with any of `body, trim, key, lcdBg, lcdFg, grille, needle` |
+| `panel` | `{ x, y, width }`: where the timer and door panel floats (at least 320 wide) |
+
+Images are SVG, PNG, WebP or JPEG, named plainly (`door.svg`, no folders). The .zip stays under 4 MB, because Vercel refuses request bodies over 4.5 MB. SVGs with a script, `<foreignObject>` or an event handler are refused.
+
+**How it works**
+
+- **The scene:** `app/components/HouseScene.vue` uses PixiJS directly.
+  - It draws on demand (`autoStart: false`), not 60 times a second: the house sits in a background tab for hours.
+  - SVGs are rasterized at twice their size, so they stay sharp.
+  - It imports `pixi.js/unsafe-eval`: the site's Content Security Policy blocks `eval`, and without that module pixi refused to start.
+  - It's `aria-hidden`; the page keeps the member list (visually hidden in room mode) and adds a seat picker.
+- **The room's contents:**
+  - **Doors:** each member present has a door on the nook wall, lit by their door state. Open is a dark open doorway: they're out in the commons. Ajar is a warm halo and a bright gap at the edge. Closed is a light under the door, spilling onto the floor.
+  - **Seats:** members whose door is open sit on seats. `seatMembers()` in `shared/utils/theme.ts` decides who sits where, and the unit tests cover it. You sit where you chose; anyone else takes the next free seat; extras stand in their own doorway.
+  - **Picking a seat:** empty seats are rings you click while your door is open, or you use the seat picker.
+- **Placement:** the radio and the panel are real page content placed with CSS variables from the scene's fit (`--x/--y/--w/--h`). Their text isn't scaled, so it stays readable. A `room:` Tailwind variant marks room mode, `(min-width: 1024px) and (min-height: 600px)`. Both layouts use the same DOM nodes, so the YouTube player never remounts when the window crosses the breakpoint.
+- **The skin:** the radio's skin is applied after mount. The server doesn't know the colour mode, and its guess caused a hydration mismatch.
+- **Seats:**
+  - Seats are stored in `member_state.slot` and set with the `{ t: 'sit', slot }` intent, which publishes `member`.
+  - The server refuses a seat the theme doesn't have, or one a member present is in. Concurrent `sit`s are serialized with an advisory lock.
+  - A seat is kept across doors and visits.
+- **Themes:**
+  - The house's theme is in `house_state.theme`. The snapshot carries `theme: { id, version }`, where `version` is the upload time of an uploaded pack (0 for built-in ones).
+  - The host (admin) changes it with `{ t: 'theme', themeId }`. That publishes `theme` and empties every seat.
+  - Re-uploading the pack in use publishes `theme` with `keepSeats`: the new version is loaded, and only seats that no longer exist are emptied.
+  - Built-in packs come from the bundle, so the first render already has the layout. Uploaded ones are fetched (`GET /api/v1/themes/:id`).
+- **Packs on the server:**
+  - Built-in packs: JSON in `shared/themes/`, images in `public/themes/<id>/`.
+  - Uploaded packs: the JSON in `theme_pack`, the images in blob storage at `themes/<id>/<file>`.
+  - Routes:
+    - `GET /api/v1/themes` (list) and `GET /api/v1/themes/:id`;
+    - `POST /api/v1/themes` (upload, `pack` form field) and `DELETE /api/v1/themes/:id` (host only);
+    - `GET /api/v1/themes/:id/files/:file` (images). These need a session and are served with `Content-Security-Policy: sandbox`, `nosniff` and immutable caching; the URLs carry `?v=<version>`.
+  - The theme in use and built-in themes can't be removed.
+  - Upload refusals name the problem, e.g. "theme.json names door.svg, but the .zip has no door.svg next to it."
+- **Manage house:** a Themes tab lists packs, uploads a .zip, puts the house in a theme, and removes uploaded ones.
+- **Dependencies:** `fflate` added for unzipping. `vue3-pixi` was already installed and isn't used.
+
+Verified against a throwaway Postgres 18 in `nuxt dev` on port 3001, with the S3 variables unset so blob storage was NuxtHub's local `fs` driver and the production bucket wasn't touched. 34 protocol checks, all passing:
+
+- **Seats:** sitting; a taken seat and an unknown seat refused; the seat kept when the door closes.
+- **Access:** theme routes need a session (401), and uploads are for the host only (403).
+- **Upload refusals:** 8, each with its reason: not a zip, no `theme.json`, broken JSON, a schema error with its path, a missing image, a script in an SVG, a built-in id, over 4 MB.
+- **A good upload:** `theme.json` inside a folder of the zip.
+- **Serving:** the pack with its asset base; an image as SVG, sandboxed, immutable, and 401 without a session.
+- **Picking a theme:**
+  - a member can't change the theme;
+  - when the host does, a versioned message reaches everyone and everyone stands up;
+  - a late joiner gets the new theme;
+  - the old room's seat is refused and the new room's works.
+- **Re-uploading the theme in use:** a removed seat emptied and a kept one stayed.
+- **Removing:** the theme in use (409) and a built-in one can't be removed; another theme and its images are removed (204, then 404); picking a removed theme is refused.
+
+12 unit tests pass, including the built-in pack's validity, schema refusals and the seating rule.
+
+In a browser, in a 1280×800 frame (the test browser's own window is 390×225):
+
+- **Fit:** the canvas filled the frame (scale 0.8). The panel was at the theme's spot, 304 px wide. The radio stood in its 416 px slot with its bottom at the sideboard's top, without scrolling.
+- **Clicking a seat:** clicking an empty sofa seat in the canvas moved me there; the seat picker then read "Sofa middle".
+- **Doors:** with members held in by a script, the nook wall showed kai's closed door with light under it, mina's ajar door with a halo and a gap of light, and wilson's open doorway, with him on the sofa.
+- **Phone width:** at 390 px the scene was a 375×211 band with the page below and nothing past the edge, and there were no hydration warnings.
+
+Not checked: the radio skin in light mode, by eye; uploads to MEGA S4 itself; how the canvas performs with dozens of members.
 
 ## Step 13: traces
 

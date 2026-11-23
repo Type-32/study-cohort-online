@@ -87,6 +87,8 @@ export default defineNuxtConfig({
 			// The cookie is the identity for invite accounts; losing it needs a re-entry link.
 			maxAge: 60 * 60 * 24 * 365,
 		},
+		// YouTube Data API v3 key, for playlists (bands on the radio). NUXT_YOUTUBE_API_KEY.
+		youtubeApiKey: '',
 		public: {
 			siteName: '',
 			siteUrl: '',

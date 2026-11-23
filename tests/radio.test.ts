@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test'
-import { DEFAULT_DOOR_SOUND, FM_MAX, FM_MIN, doorSound, formatFrequency, nextRadio, nextUp, parseYouTubeId, queuePositionFor, radioPositionMs, shelfOrder, stationFrequency } from '../shared/utils/radio'
+import { DEFAULT_DOOR_SOUND, FM_MAX, FM_MIN, bandStrip, doorSound, formatFrequency, nextRadio, nextUp, parseYouTubeLink, queuePositionFor, radioPositionMs, shelfOrder, stationFrequency } from '../shared/utils/radio'
 import type { DoorSoundSettings, Suggestion } from '../shared/utils/radio'
+import { playableItems } from '../server/utils/youtube'
+import { seatMembers, themePackSchema } from '../shared/utils/theme'
+import livingRoom from '../shared/themes/living-room.json'
 
 const ID = 'jfKfPfyJRdk'
 
@@ -59,21 +62,25 @@ test('queuePositionFor puts a track ahead of, behind, or out of the queue', () =
 	expect(queuePositionFor(s, 'b', 'last')).toBe(1)
 })
 
-test('parseYouTubeId accepts the common link shapes and rejects the rest', () => {
+test('parseYouTubeLink: tracks from the common link shapes, bands from playlist links, nothing from the rest', () => {
 	for (const link of [
 		ID,
 		`https://www.youtube.com/watch?v=${ID}&t=42s`,
 		`youtube.com/watch?v=${ID}`,
 		`https://youtu.be/${ID}?si=abc`,
 		`https://m.youtube.com/watch?v=${ID}`,
-		`https://music.youtube.com/watch?v=${ID}&list=RD`,
+		`https://music.youtube.com/watch?v=${ID}&list=RDAMVM${ID}`,
 		`https://www.youtube.com/live/${ID}?feature=share`,
 		`https://youtube.com/shorts/${ID}`,
 		`https://www.youtube-nocookie.com/embed/${ID}`,
-	]) expect(parseYouTubeId(link)).toBe(ID)
+	]) expect(parseYouTubeLink(link)).toEqual({ kind: 'track', id: ID })
 
-	for (const bad of ['', 'hello', `https://vimeo.com/${ID}`, 'https://www.youtube.com/watch?v=short', 'https://youtu.be/'])
-		expect(parseYouTubeId(bad)).toBeUndefined()
+	const PL = 'PLx0sYbCqOb8TBPRdmBHs5Iftvv9TPboYG'
+	for (const link of [PL, `https://www.youtube.com/playlist?list=${PL}`, `https://www.youtube.com/watch?v=${ID}&list=${PL}&index=3`, `https://music.youtube.com/playlist?list=${PL}`])
+		expect(parseYouTubeLink(link)).toEqual({ kind: 'band', id: PL })
+
+	for (const bad of ['', 'hello', 'helloworldhello', `https://vimeo.com/${ID}`, 'https://www.youtube.com/watch?v=short', 'https://youtu.be/', 'https://www.youtube.com/playlist?list=WL'])
+		expect(parseYouTubeLink(bad)).toBeUndefined()
 })
 
 test('doorSound: open is untouched, quieter lowers, silent mutes, muffled adds a bed that follows the slider', () => {
@@ -97,13 +104,69 @@ test('doorSound: open is untouched, quieter lowers, silent mutes, muffled adds a
 	expect(doorSound('closed', { ajar: 'quieter', closed: 'loud' } as unknown as DoorSoundSettings, 60)).toMatchObject({ muted: true })
 })
 
-test('206 stations get 206 different places on the band, spread from the start, and never move', () => {
+test('206 stations get 206 different places on the scale, spread from the start, and never move', () => {
 	const places = Array.from({ length: 206 }, (_, i) => stationFrequency(i + 1))
 	expect(new Set(places.map((p) => p.mhz)).size).toBe(206)
-	expect(places.every((p) => p.band === 1 && p.mhz >= FM_MIN && p.mhz <= FM_MAX && Math.round(p.mhz * 10) === p.mhz * 10)).toBe(true)
+	expect(places.every((p) => p.fm === 1 && p.mhz >= FM_MIN && p.mhz <= FM_MAX && Math.round(p.mhz * 10) === p.mhz * 10)).toBe(true)
 	expect(places.slice(0, 4).map((p) => p.mhz)).toEqual([87.5, 100.3, 93.9, 106.7])
 	expect(stationFrequency(42)).toEqual(stationFrequency(42))
-	expect(stationFrequency(207)).toEqual({ band: 2, mhz: 87.5 })
+	expect(stationFrequency(207)).toEqual({ fm: 2, mhz: 87.5 })
 	expect(formatFrequency(2)).toBe('100.3 FM')
 	expect(formatFrequency(208)).toBe('100.3 FM2')
+})
+
+test('bandStrip: a strip around the station, 0.2 MHz a track within 0.8 to 3.0, inside the scale, a mark per track', () => {
+	const mid = bandStrip(2, 8) // 100.3
+	expect(mid.from).toBeCloseTo(99.5)
+	expect(mid.to).toBeCloseTo(101.1)
+	expect(mid.marks).toHaveLength(8)
+	expect(mid.marks.every((m, i) => m > mid.from && m < mid.to && (i === 0 || m > mid.marks[i - 1]!))).toBe(true)
+	expect(bandStrip(2, 1).to - bandStrip(2, 1).from).toBeCloseTo(0.8)
+	expect(bandStrip(2, 200).to - bandStrip(2, 200).from).toBeCloseTo(3)
+	// Station 1 sits at 87.5, the scale's left end: the strip starts there instead of hanging off it.
+	expect(bandStrip(1, 10).from).toBe(FM_MIN)
+})
+
+test('playableItems keeps public and unlisted tracks in order, drops deleted and private placeholders', () => {
+	const item = (videoId: string | undefined, privacyStatus: string, title: string) => ({ snippet: { title, resourceId: { kind: 'youtube#video', videoId } }, status: { privacyStatus } })
+	const page = {
+		kind: 'youtube#playlistItemListResponse',
+		nextPageToken: 'CAUQAA',
+		items: [
+			item('aaaaaaaaaaa', 'public', 'One'),
+			item('bbbbbbbbbbb', 'privacyStatusUnspecified', 'Deleted video'),
+			item('ccccccccccc', 'private', 'Private video'),
+			item('ddddddddddd', 'unlisted', 'Four'),
+			item(undefined, 'public', 'No id'),
+		],
+	}
+	expect(playableItems(page)).toEqual([{ videoId: 'aaaaaaaaaaa', title: 'One' }, { videoId: 'ddddddddddd', title: 'Four' }])
+	expect(playableItems({})).toEqual([])
+})
+
+test('the built-in pack is valid, and the schema refuses broken packs with a reason', () => {
+	expect(themePackSchema.safeParse(livingRoom).success).toBe(true)
+	const broken = (patch: object) => themePackSchema.safeParse({ ...livingRoom, ...patch })
+	expect(broken({ backdrop: '../secret.svg' }).success).toBe(false)
+	expect(broken({ backdrop: 'backdrop.gif' }).success).toBe(false)
+	expect(broken({ seats: [] }).success).toBe(false)
+	expect(broken({ seats: [{ id: 'a', x: 1, y: 1 }, { id: 'a', x: 2, y: 2 }] }).error?.issues[0]?.message).toBe('seat ids must be unique')
+	expect(broken({ radio: { slot: { x: 0, y: 0, width: 300, height: 400 } } }).success).toBe(false)
+	expect(broken({ format: 2 }).success).toBe(false)
+})
+
+test('seatMembers: open doors sit where they chose, others take the next free seat, the rest stand', () => {
+	const seats = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+	const m = (userId: string, door: string, slot: string | null) => ({ userId, door, slot })
+	const { seated, standing } = seatMembers(seats, [
+		m('ana', 'open', 'b'),
+		m('ben', 'open', 'b'), // b is taken: he gets the first free seat
+		m('cy', 'closed', 'c'), // closed doors aren't in the commons; their seat is free
+		m('di', 'open', 'gone'), // a seat this room doesn't have
+		m('ed', 'open', null),
+	])
+	expect(seated.get('b')?.userId).toBe('ana')
+	expect(seated.get('a')?.userId).toBe('ben')
+	expect(seated.get('c')?.userId).toBe('di')
+	expect(standing.map((s) => s.userId)).toEqual(['ed'])
 })

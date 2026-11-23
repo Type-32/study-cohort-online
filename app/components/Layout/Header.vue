@@ -35,7 +35,7 @@ const user = computed(() => $as.user.value);
 const signingOut = ref(false);
 
 // Live status, written by the home page.
-const { house, clockOffsetMs } = storeToRefs(useHouseStore());
+const { house, clockOffsetMs, loaded } = storeToRefs(useHouseStore());
 const offscreen = useState("house:offscreen", () => ({ timer: false, members: false }));
 const { running, countdown, phase } = useTimerView(computed(() => house.value.timer), clockOffsetMs);
 
@@ -148,6 +148,8 @@ const menu = computed<DropdownMenuItem[][]>(() => [
 								<UColorModeButton color="neutral" variant="ghost" />
 							</UTooltip>
 							<template v-if="user">
+								<!-- Only where the house is open (the home page connects the socket). -->
+								<HouseNotes v-if="loaded" />
 								<USlideover v-if="user.role === 'admin'" title="Manage house" description="Invite people in, and get members back in on a new device.">
 									<UTooltip text="Manage house">
 										<UButton icon="i-pixelarticons-sliders" aria-label="Manage house" color="neutral" variant="ghost" />

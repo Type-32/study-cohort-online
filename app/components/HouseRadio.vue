@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { SUGGESTION_LIMIT, doorSound, formatFrequency, nextUp, parseYouTubeId, radioPositionMs, stationFrequency } from "#shared/utils/radio";
+import { SUGGESTION_LIMIT, bandStrip, doorSound, formatFrequency, nextUp, parseYouTubeLink, radioPositionMs, stationFrequency } from "#shared/utils/radio";
 import type { RadioPhase, Station, WhenEmpty } from "#shared/utils/radio";
 import type { Intent } from "#shared/utils/realtime";
 import { satisfies } from "#shared/utils/roles";
@@ -20,7 +20,8 @@ const isHost = computed(() => !!user.value && satisfies(user.value, { minRole: "
 const suggestionsLeft = computed(() => SUGGESTION_LIMIT - house.value.suggestions.filter((s) => s.userId === user.value?.id).length);
 
 const link = ref("");
-const videoId = computed(() => parseYouTubeId(link.value));
+/** What the pasted link points at: a track, or a playlist (a band). */
+const linked = computed(() => parseYouTubeLink(link.value));
 /** The title the player reports; the server's (from YouTube) shows until then. */
 const title = ref<string>();
 /** The track's length from the player, in seconds; null for a live stream. */
@@ -104,8 +105,14 @@ const heading = computed(() => {
 const byline = computed(() => (radio.value ? (radio.value.by ? `Picked by ${radio.value.by}` : "A shuffle pick") : undefined));
 const lcdState = computed(() => (!loaded.value ? "connecting" : !radio.value ? "off" : phase.value));
 const nextTitle = computed(() => {
+	// In a band, its next track comes before the shelf.
+	const band = radio.value?.band;
+	if (band && band.index + 1 < band.length) {
+		const track = stationList.value?.find((s) => s.id === band.id)?.tracks?.[band.index + 1];
+		return track?.title ?? `Track ${band.index + 2}/${band.length}`;
+	}
 	const next = nextUp(house.value.suggestions);
-	return next ? (next.title ?? "Untitled track") : null;
+	return next ? (next.title ?? (next.band ? "A band" : "Untitled track")) : null;
 });
 const onAir = computed(() => !!radio.value && phase.value === "playing");
 // The rumble plays only while the music does, and follows your mute.
@@ -114,86 +121,134 @@ useDoorBed(() => (onAir.value && !muted.value ? sound.value.bed : 0));
 const now = useNow({ interval: 1000 });
 const positionMs = computed(() => (radio.value ? radioPositionMs(radio.value, now.value.getTime() + clockOffsetMs.value) : 0));
 
-/** A track going on air now (host), to the back of the queue (host), or as a suggestion (member). */
-const trackIntent = (how: "play" | "queue" | "suggest", id: string): Intent =>
-	how === "play" ? { t: "radio", action: "play", videoId: id } : { t: "suggest", suggestionId: newId(), videoId: id, queue: how === "queue" };
+/**
+ * A track or band going on air now (host), to the back of the queue (host), or as a suggestion
+ * (member). A band plays from track `track` when put on air now; on the shelf it starts at its first.
+ */
+function addIntent(how: "play" | "queue" | "suggest", target: { kind: "track" | "band"; id: string; track?: number | null }): Intent {
+	if (how === "play") return target.kind === "band" ? { t: "radio", action: "playBand", playlistId: target.id, index: target.track ?? 0 } : { t: "radio", action: "play", videoId: target.id };
+	const item = target.kind === "band" ? { playlistId: target.id } : { videoId: target.id };
+	return { t: "suggest", suggestionId: newId(), ...item, queue: how === "queue" };
+}
 
 function submitLink(how: "play" | "queue" | "suggest") {
-	if (!videoId.value) return;
-	sendLink(trackIntent(how, videoId.value));
+	if (!linked.value) return;
+	sendLink(addIntent(how, linked.value));
 	link.value = "";
 }
 
-// The tuner (step 10): every track the house has played is a station. Browsing is yours alone: it
-// sends nothing, and the needle goes back to the station on air after 10 s or on Escape.
-// Fetched once the socket is up (the request needs the browser's session), and again whenever a
-// track goes on air, so a new station and play counts show without a reload.
-// ponytail: the whole list per track change; send only the changed station if the catalog gets big.
+// The tuner (step 10): every track and band the house has played is a station. Browsing is yours
+// alone: it sends nothing, and the needle goes back to the station on air after 10 s or on Escape.
+// Fetched once the socket is up (the request needs the browser's session), and again whenever
+// something new goes on air, so a new station and play counts show without a reload.
+// ponytail: the whole list per change; send only the changed station if the catalog gets big.
 const { data: stationList, refetch: refetchStations } = useQuery({
 	key: ["radio-stations"],
 	query: () => $fetch<Station[]>("/api/v1/radio/stations"),
 	enabled: loaded,
 });
-watch(() => (radio.value?.station != null ? `${radio.value.station}:${radio.value.videoId}` : undefined), (key) => key && stationList.value && refetchStations());
-
-/** The dial's stations, in dial order (band, then frequency). */
-const dialStations = computed(() =>
-	(stationList.value ?? []).map((s) => ({ ...s, ...stationFrequency(s.station) })).sort((a, b) => a.band - b.band || a.mhz - b.mhz),
+watch(
+	() => (radio.value?.station != null ? `${radio.value.station}:${radio.value.band?.id ?? radio.value.videoId}` : undefined),
+	(key) => key && stationList.value && refetchStations(),
 );
-const browsing = ref<number | null>(null);
-const needleStation = computed(() => browsing.value ?? radio.value?.station ?? null);
-const needleBand = computed(() => (needleStation.value != null ? stationFrequency(needleStation.value).band : 1));
-const bandStations = computed(() => dialStations.value.filter((s) => s.band === needleBand.value));
-const mhzOnBand = (station: number | null | undefined) => {
-	if (station == null) return null;
-	const { band, mhz } = stationFrequency(station);
-	return band === needleBand.value ? mhz : null;
+
+/**
+ * Where the needle can rest, in dial order: a track station, or one of a band's tracks (`track`).
+ * A band's tracks follow each other, so the knob crosses a band as a block.
+ */
+type Stop = { station: Station; fm: number; mhz: number; track: number | null };
+const stops = computed<Stop[]>(() =>
+	(stationList.value ?? [])
+		.map((station) => ({ station, ...stationFrequency(station.station) }))
+		.sort((a, b) => a.fm - b.fm || a.mhz - b.mhz)
+		.flatMap(({ station, fm, mhz }): Stop[] =>
+			station.kind === "band" && station.tracks?.length
+				? bandStrip(station.station, station.tracks.length).marks.map((mark, track) => ({ station, fm, mhz: mark, track }))
+				: [{ station, fm, mhz, track: null }],
+		),
+);
+const stopIndex = (target: { station: number; track: number | null } | null) => {
+	if (!target) return -1;
+	const exact = stops.value.findIndex((s) => s.station.station === target.station && s.track === target.track);
+	return exact >= 0 ? exact : stops.value.findIndex((s) => s.station.station === target.station);
 };
-const browsed = computed(() => (browsing.value == null ? undefined : dialStations.value.find((s) => s.station === browsing.value)));
+/** Each station once, in dial order, for the station list. */
+const dialStations = computed(() => [...new Map(stops.value.map((s) => [s.station.id, s.station])).values()]);
+const browsing = ref<{ station: number; track: number | null } | null>(null);
+const onAirStop = computed(() => stops.value[stopIndex(radio.value?.station != null ? { station: radio.value.station, track: radio.value.band?.index ?? null } : null)]);
+const needleStop = computed(() => (browsing.value ? stops.value[stopIndex(browsing.value)] : onAirStop.value));
+/** The FM scale the needle is on; the dial shows one at a time. */
+const scaleStops = computed(() => stops.value.filter((s) => s.fm === (needleStop.value?.fm ?? 1)));
+const dialTicks = computed(() => scaleStops.value.filter((s) => s.track === null).map((s) => s.mhz));
+const dialStrips = computed(() =>
+	scaleStops.value.filter((s) => s.track === 0).map((s) => ({ key: s.station.id, ...bandStrip(s.station.station, s.station.tracks!.length) })),
+);
+const onScale = (stop: Stop | undefined) => (stop && stop.fm === (needleStop.value?.fm ?? 1) ? stop.mhz : null);
+const browsed = computed(() => (browsing.value ? needleStop.value : undefined));
 const { start: holdNeedle } = useTimeoutFn(() => (browsing.value = null), 10_000, { immediate: false });
-function tuneTo(station: number) {
-	browsing.value = station;
+function tuneTo(stop: Stop | undefined) {
+	if (!stop) return;
+	browsing.value = { station: stop.station.station, track: stop.track };
 	holdNeedle();
 }
 onKeyStroke("Escape", () => (browsing.value = null));
-/** The tuning knob steps from station to station: its value is the needle's place in dial order. */
+/** The tuning knob steps from stop to stop: its value is the needle's place in dial order. */
 const tunerIndex = computed({
-	get: () => Math.max(0, dialStations.value.findIndex((s) => s.station === needleStation.value)),
-	set: (index) => dialStations.value[index] && tuneTo(dialStations.value[index].station),
+	get: () => Math.max(0, needleStop.value ? stops.value.indexOf(needleStop.value) : 0),
+	set: (index) => tuneTo(stops.value[index]),
 });
+const trackTitle = (stop: Stop) => (stop.track === null ? stop.station.title : stop.station.tracks?.[stop.track]?.title) ?? "Untitled track";
 const tunerText = computed(() => {
-	const s = dialStations.value[tunerIndex.value];
-	return s ? `${formatFrequency(s.station)}, ${s.title ?? "Untitled track"}${s.videoId === onAirVideoId.value ? ", on air" : ""}` : "No stations yet";
+	const s = stops.value[tunerIndex.value];
+	if (!s) return "No stations yet";
+	const where = s.track === null ? "" : `, band ${s.station.title ?? "untitled"}, track ${s.track + 1} of ${s.station.tracks!.length}`;
+	return `${formatFrequency(s.station.station)}${where}, ${trackTitle(s)}${s === onAirStop.value && phase.value !== "ended" ? ", on air" : ""}`;
 });
 
-/** The track on air, unless it's over (then the house moves on as soon as something is added). */
-const onAirVideoId = computed(() => (radio.value && phase.value !== "ended" ? radio.value.videoId : undefined));
-/** Why the browsed station can't be added, if it can't. */
-const addBlocked = computed(() => {
-	if (!browsed.value) return "Turn the tuning knob to a station first";
-	if (browsed.value.videoId === onAirVideoId.value) return "That one is on air right now";
-	if (house.value.suggestions.some((s) => s.videoId === browsed.value!.videoId)) return "That one is already on the shelf";
+/** The track or band on air, unless it's over (then the house moves on as soon as something is added). */
+const onAirId = computed(() => (radio.value && phase.value !== "ended" ? (radio.value.band?.id ?? radio.value.videoId) : undefined));
+const onShelf = (station: Station) => house.value.suggestions.some((s) => (station.kind === "band" ? s.band?.id : s.videoId) === station.id);
+/** Why the station under the needle can't go on air now (`play`) or on the shelf, if it can't. */
+function addBlocked(how: "play" | "queue" | "suggest") {
+	const stop = browsed.value;
+	if (!stop) return "Turn the tuning knob to a station first";
+	const onAirNow = stop.station.id === onAirId.value;
+	// Another track of the band on air can be played now: the band jumps there.
+	if (onAirNow && (how !== "play" || stop === onAirStop.value)) return stop.track === null ? "That one is on air right now" : "That band is on air right now";
+	if (onShelf(stop.station)) return "That one is already on the shelf";
 	if (!isHost.value && suggestionsLeft.value <= 0) return `You have ${SUGGESTION_LIMIT} suggestions waiting`;
-});
+}
 function addBrowsed(how: "play" | "queue" | "suggest") {
-	if (!browsed.value || addBlocked.value) return;
-	sendIntent(trackIntent(how, browsed.value.videoId));
+	const stop = browsed.value;
+	if (!stop || addBlocked(how)) return;
+	sendIntent(addIntent(how, { kind: stop.station.kind, id: stop.station.id, track: stop.track }));
 	// Played now, the needle is on air; added to the shelf, it stays to show that.
 	if (how === "play") browsing.value = null;
 	else holdNeedle();
 }
 const lcdBrowse = computed(() => {
-	const s = browsed.value;
-	if (!s) return undefined;
+	const stop = browsed.value;
+	if (!stop) return undefined;
+	const s = stop.station;
 	// The status line also says why the add key is disabled: a disabled key shows no tooltip.
-	const status = s.videoId === onAirVideoId.value
+	const status = stop === onAirStop.value && phase.value !== "ended"
 		? "On air now"
-		: house.value.suggestions.some((x) => x.videoId === s.videoId)
-			? "On the shelf"
-			: !isHost.value && suggestionsLeft.value <= 0
-				? `${SUGGESTION_LIMIT} of ${SUGGESTION_LIMIT} suggestions waiting`
-				: s.unplayable ? "No signal last time" : undefined;
-	return { frequency: formatFrequency(s.station), title: s.title, plays: s.plays, lastPlayedAtServerMs: s.lastPlayedAtServerMs, addedBy: s.addedBy, status };
+		: s.id === onAirId.value
+			? `Band on air · track ${radio.value!.band!.index + 1}`
+			: onShelf(s)
+				? "On the shelf"
+				: !isHost.value && suggestionsLeft.value <= 0
+					? `${SUGGESTION_LIMIT} of ${SUGGESTION_LIMIT} suggestions waiting`
+					: s.unplayable ? "No signal last time" : undefined;
+	return {
+		frequency: `${formatFrequency(s.station)}${stop.track === null ? "" : " · Band"}`,
+		title: s.title,
+		track: stop.track === null ? undefined : `Track ${stop.track + 1}/${s.tracks!.length} · ${trackTitle(stop)}`,
+		plays: s.plays,
+		lastPlayedAtServerMs: s.lastPlayedAtServerMs,
+		addedBy: s.addedBy,
+		status,
+	};
 });
 
 /** This player saw the track end, or YouTube refused it: tell the house, so it moves on. */
@@ -211,10 +266,29 @@ function openOnYouTube() {
 /** A key on the cabinet: at least 44 px, pressed in with a spring (`whilePress`). */
 const keyClass = "min-h-11 min-w-11 justify-center rounded-lg bg-(--radio-key) shadow-[inset_0_-2px_0_var(--radio-trim)] ring-1 ring-(--radio-trim)";
 const keyPress = { scale: 0.94, y: 1 };
+
+/**
+ * The theme's skin for the cabinet (step 12): its colours for the page's light or dark mode, over
+ * the defaults in the style block. Only the `--radio-*` variables change, never the layout. Applied
+ * after mount: the server doesn't know the colour mode, and a guess would mismatch on hydration.
+ */
+const { info: theme } = useHouseTheme();
+const colorMode = useColorMode();
+const mounted = useMounted();
+const skin = computed(() => {
+	const s = theme.value?.pack.radio.skin;
+	if (!s || !mounted.value) return {};
+	const colors = (colorMode.value === "dark" ? s.dark : s.light) ?? {};
+	const vars: Record<string, string> = { body: "--radio-body", trim: "--radio-trim", key: "--radio-key", lcdBg: "--radio-lcd-bg", lcdFg: "--radio-lcd-fg", grille: "--radio-grille", needle: "--radio-needle" };
+	return {
+		...Object.fromEntries(Object.entries(colors).map(([k, v]) => [vars[k], v])),
+		...(s.radius !== undefined ? { "--radio-radius": `${s.radius}px` } : {}),
+	};
+});
 </script>
 
 <template>
-	<section id="house-radio" class="radio flex scroll-mt-24 flex-col gap-4" aria-labelledby="radio-title">
+	<section id="house-radio" class="radio flex scroll-mt-24 flex-col gap-4" :style="skin" aria-labelledby="radio-title">
 		<!-- The LCD says this visually; screen readers get it in words. -->
 		<h2 id="radio-title" class="sr-only">Radio: {{ heading }}</h2>
 		<p class="sr-only">{{ [`${status}.`, byline && `${byline}.`, doorHint].filter(Boolean).join(" ") }}</p>
@@ -222,25 +296,39 @@ const keyPress = { scale: 0.94, y: 1 };
 		<div class="flex flex-col gap-3 rounded-(--radio-radius) bg-(--radio-body) p-3 ring-1 ring-(--radio-trim) sm:p-4">
 			<!-- The tuner's window and its keys. On phones the keys go under the dial. -->
 			<div class="flex flex-wrap items-center justify-end gap-2">
-				<RadioDial class="w-full sm:w-auto sm:min-w-0 sm:flex-1" :stations="bandStations" :needle="mhzOnBand(needleStation)" :on-air="mhzOnBand(radio?.station)" @tune="tuneTo" />
+				<RadioDial
+					class="w-full sm:w-auto sm:min-w-0 sm:flex-1"
+					:stops="scaleStops.map((s) => s.mhz)"
+					:ticks="dialTicks"
+					:strips="dialStrips"
+					:needle="onScale(needleStop)"
+					:on-air="onScale(onAirStop)"
+					@tune="(i) => tuneTo(scaleStops[i])"
+				/>
 				<template v-if="isHost">
-					<UTooltip :text="addBlocked ?? 'Play this station now, for everyone'">
+					<UTooltip :text="addBlocked('play') ?? (browsed?.track != null ? `Play this band now from track ${browsed.track + 1}, for everyone` : 'Play this station now, for everyone')">
 						<Motion as-child :while-press="keyPress">
-							<UButton icon="i-pixelarticons-play" aria-label="Play the station under the needle now" color="neutral" variant="ghost" :class="keyClass" :disabled="!!addBlocked" @click="addBrowsed('play')" />
+							<UButton icon="i-pixelarticons-play" aria-label="Play the station under the needle now" color="neutral" variant="ghost" :class="keyClass" :disabled="!!addBlocked('play')" @click="addBrowsed('play')" />
 						</Motion>
 					</UTooltip>
-					<UTooltip :text="addBlocked ?? 'Add this station to the end of the queue'">
+					<UTooltip :text="addBlocked('queue') ?? (browsed?.track != null ? 'Add this band to the end of the queue (from its first track)' : 'Add this station to the end of the queue')">
 						<Motion as-child :while-press="keyPress">
-							<UButton icon="i-pixelarticons-playlist" aria-label="Queue the station under the needle" color="neutral" variant="ghost" :class="keyClass" :disabled="!!addBlocked" @click="addBrowsed('queue')" />
+							<UButton icon="i-pixelarticons-playlist" aria-label="Queue the station under the needle" color="neutral" variant="ghost" :class="keyClass" :disabled="!!addBlocked('queue')" @click="addBrowsed('queue')" />
 						</Motion>
 					</UTooltip>
 				</template>
-				<UTooltip v-else :text="addBlocked ?? `Suggest this station (${suggestionsLeft} of ${SUGGESTION_LIMIT} left)`">
+				<UTooltip v-else :text="addBlocked('suggest') ?? `Suggest this ${browsed?.track != null ? 'band' : 'station'} (${suggestionsLeft} of ${SUGGESTION_LIMIT} left)`">
 					<Motion as-child :while-press="keyPress">
-						<UButton icon="i-pixelarticons-plus" aria-label="Suggest the station under the needle" color="neutral" variant="ghost" :class="keyClass" :disabled="!!addBlocked" @click="addBrowsed('suggest')" />
+						<UButton icon="i-pixelarticons-plus" aria-label="Suggest the station under the needle" color="neutral" variant="ghost" :class="keyClass" :disabled="!!addBlocked('suggest')" @click="addBrowsed('suggest')" />
 					</Motion>
 				</UTooltip>
-				<RadioStationList :stations="dialStations" :on-air-video-id="onAirVideoId" :can-remove="isHost" :key-class="keyClass" @choose="tuneTo" />
+				<RadioStationList
+					:stations="dialStations"
+					:on-air-id="onAirId"
+					:can-remove="isHost"
+					:key-class="keyClass"
+					@choose="(n) => tuneTo(stops.find((s) => s.station.station === n && (s.track ?? 0) === 0))"
+				/>
 			</div>
 
 			<!-- minmax(0, …): without it a column is at least as wide as its widest content: the LCD's
@@ -286,6 +374,7 @@ const keyPress = { scale: 0.94, y: 1 };
 						:queue-length="house.suggestions.length"
 						:volume="volumeShown"
 						:frequency="radio?.station != null ? formatFrequency(radio.station) : undefined"
+						:band="radio?.band ?? undefined"
 						:browse="lcdBrowse"
 					/>
 					<div class="flex items-end justify-between gap-3">
@@ -298,9 +387,9 @@ const keyPress = { scale: 0.94, y: 1 };
 								label="Tuning"
 								aria-label="Tuning, browse the stations"
 								:value-text="tunerText"
-								:max="Math.max(0, dialStations.length - 1)"
+								:max="Math.max(0, stops.length - 1)"
 								:wheel-step="1"
-								:disabled="dialStations.length < 2"
+								:disabled="stops.length < 2"
 							/>
 						</UTooltip>
 						<!-- The grille moves while the radio is on air. It's decoration: the audio can't be read. -->
@@ -337,9 +426,14 @@ const keyPress = { scale: 0.94, y: 1 };
 						</Motion>
 					</UTooltip>
 					<template v-if="isHost">
-						<UTooltip text="Skip to what's next, for everyone">
+						<UTooltip :text="radio.band && radio.band.index + 1 < radio.band.length ? 'Skip to the band\'s next track, for everyone' : 'Skip to what\'s next, for everyone'">
 							<Motion as-child :while-press="keyPress">
 								<UButton icon="i-pixelarticons-next" aria-label="Skip" color="neutral" variant="ghost" :class="keyClass" :disabled="tuning" @click="sendIntent({ t: 'radio', action: 'skip' })" />
+							</Motion>
+						</UTooltip>
+						<UTooltip v-if="radio.band" text="Leave the band: skip its remaining tracks, for everyone">
+							<Motion as-child :while-press="keyPress">
+								<UButton icon="i-pixelarticons-logout" aria-label="Leave the band" color="neutral" variant="ghost" :class="keyClass" :disabled="tuning" @click="sendIntent({ t: 'radio', action: 'leaveBand' })" />
 							</Motion>
 						</UTooltip>
 						<UTooltip text="Turn off for everyone">
@@ -405,37 +499,39 @@ const keyPress = { scale: 0.94, y: 1 };
 				<span v-else class="text-xs text-muted">Your door is open: you hear the radio at your volume.</span>
 			</div>
 
-			<!-- The tape slot: members suggest; the host plays now or queues. -->
+			<!-- The tape slot: members suggest; the host plays now or queues. A playlist link is a band. -->
 			<form @submit.prevent="submitLink(isHost ? 'play' : 'suggest')">
 				<UInput
 					v-model="link"
-					:placeholder="isHost ? 'Insert a YouTube link to play or queue it' : 'Insert a YouTube link to suggest it'"
-					icon="i-pixelarticons-music"
+					:placeholder="isHost ? 'Insert a YouTube link or playlist to play or queue it' : 'Insert a YouTube link or playlist to suggest it'"
+					:icon="linked?.kind === 'band' ? 'i-pixelarticons-playlist' : 'i-pixelarticons-music'"
 					variant="soft"
 					size="lg"
 					class="w-full"
-					aria-label="YouTube link"
-					:color="link && !videoId ? 'error' : 'primary'"
-					:highlight="!!link && !videoId"
+					aria-label="YouTube link or playlist"
+					:aria-describedby="linked?.kind === 'band' || !isHost ? 'radio-link-hint' : undefined"
+					:color="link && !linked ? 'error' : 'primary'"
+					:highlight="!!link && !linked"
 					:disabled="!isHost && suggestionsLeft <= 0"
 					:ui="{ base: 'font-mono', trailing: 'pe-1' }"
 				>
 					<template #trailing>
 						<template v-if="isHost">
-							<UTooltip :text="link && !videoId ? 'That doesn\'t look like a YouTube link' : 'Play now, for everyone'">
-								<UButton type="submit" icon="i-pixelarticons-play" aria-label="Play now" variant="ghost" class="min-h-11 min-w-11 justify-center" :disabled="!videoId" :loading="sending" />
+							<UTooltip :text="link && !linked ? 'That doesn\'t look like a YouTube link' : linked?.kind === 'band' ? 'Play the playlist now as a band, for everyone' : 'Play now, for everyone'">
+								<UButton type="submit" icon="i-pixelarticons-play" aria-label="Play now" variant="ghost" class="min-h-11 min-w-11 justify-center" :disabled="!linked" :loading="sending" />
 							</UTooltip>
 							<UTooltip text="Add to the end of the queue">
-								<UButton icon="i-pixelarticons-playlist" aria-label="Add to the queue" variant="ghost" class="min-h-11 min-w-11 justify-center" :disabled="!videoId" @click="submitLink('queue')" />
+								<UButton icon="i-pixelarticons-playlist" aria-label="Add to the queue" variant="ghost" class="min-h-11 min-w-11 justify-center" :disabled="!linked" @click="submitLink('queue')" />
 							</UTooltip>
 						</template>
-						<UTooltip v-else :text="link && !videoId ? 'That doesn\'t look like a YouTube link' : 'Suggest it; the host decides when it plays'">
-							<UButton type="submit" icon="i-pixelarticons-plus" aria-label="Suggest" variant="ghost" class="min-h-11 min-w-11 justify-center" :disabled="!videoId" :loading="sending" />
+						<UTooltip v-else :text="link && !linked ? 'That doesn\'t look like a YouTube link' : 'Suggest it; the host decides when it plays'">
+							<UButton type="submit" icon="i-pixelarticons-plus" aria-label="Suggest" variant="ghost" class="min-h-11 min-w-11 justify-center" :disabled="!linked" :loading="sending" />
 						</UTooltip>
 					</template>
 				</UInput>
-				<p v-if="!isHost" class="mt-1.5 text-xs text-muted">
-					{{ suggestionsLeft > 0 ? `${suggestionsLeft} of ${SUGGESTION_LIMIT} suggestions left.` : `You have ${SUGGESTION_LIMIT} suggestions waiting. Withdraw one, or wait for one to play.` }}
+				<p v-if="linked?.kind === 'band' || !isHost" id="radio-link-hint" class="mt-1.5 text-xs text-muted">
+					<template v-if="linked?.kind === 'band'">A playlist: it plays as a band, track after track (up to 200), then the shelf carries on. </template>
+					<template v-if="!isHost">{{ suggestionsLeft > 0 ? `${suggestionsLeft} of ${SUGGESTION_LIMIT} suggestions left.` : `You have ${SUGGESTION_LIMIT} suggestions waiting. Withdraw one, or wait for one to play.` }}</template>
 				</p>
 			</form>
 		</div>

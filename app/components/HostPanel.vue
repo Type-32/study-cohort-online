@@ -15,6 +15,7 @@ const { data: members, status: membersStatus } = useQuery({ key: ["users"], quer
 const tabs = [
 	{ label: "Invite links", icon: "i-pixelarticons-link", slot: "invites" as const },
 	{ label: "Members", icon: "i-pixelarticons-users", slot: "members" as const },
+	{ label: "Themes", icon: "i-pixelarticons-paint-bucket", slot: "themes" as const },
 ] satisfies TabsItem[];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -95,6 +96,43 @@ const { mutate: toggleModerator } = useMutation({
 		toastError(error, "Could not change the role");
 	},
 });
+
+// Themes (step 12): the house's look. Picking one is a house intent (everyone sees it at once and
+// stands up); uploading and removing packs is over HTTP.
+type ThemeListItem = { id: string; name: string; builtIn: boolean; uploadedAtMs: number | null };
+const { house } = storeToRefs(useHouseStore());
+const { data: themes, status: themesStatus } = useQuery({ key: ["themes"], query: () => $fetch<ThemeListItem[]>("/api/v1/themes") });
+const { mutate: sendIntent } = useHouseIntent();
+const toast = useToast();
+const packInput = useTemplateRef<HTMLInputElement>("packInput");
+const { mutate: uploadPack, isLoading: uploading } = useMutation({
+	mutation: (file: File) => {
+		const form = new FormData();
+		form.append("pack", file);
+		return $fetch<{ id: string; name: string }>("/api/v1/themes", { method: "POST", body: form });
+	},
+	onSuccess(pack) {
+		queryCache.invalidateQueries({ key: ["themes"] });
+		toast.add({ title: `"${pack.name}" uploaded`, description: "Pick it below to put the house in it.", color: "success", icon: "i-pixelarticons-check" });
+	},
+	onError: (error) => toastError(error, "Could not upload the theme"),
+	onSettled: () => packInput.value && (packInput.value.value = ""),
+});
+const { mutate: removePack } = useMutation({
+	mutation: (id: string) => $fetch<unknown>(`/api/v1/themes/${encodeURIComponent(id)}` as string, { method: "DELETE" }),
+	onMutate(id) {
+		queryCache.cancelQueries({ key: ["themes"] });
+		queryCache.setQueryData<ThemeListItem[]>(["themes"], (list = []) => list.filter((t) => t.id !== id));
+	},
+	onError(error) {
+		queryCache.invalidateQueries({ key: ["themes"] });
+		toastError(error, "Could not remove the theme");
+	},
+});
+function pickPack(event: Event) {
+	const file = (event.target as HTMLInputElement).files?.[0];
+	if (file) uploadPack(file);
+}
 </script>
 
 <template>
@@ -165,6 +203,35 @@ const { mutate: toggleModerator } = useMutation({
 								@click="reentry.mutate(member)"
 							/>
 						</template>
+					</li>
+				</ul>
+			</div>
+		</template>
+
+		<template #themes>
+			<div class="flex flex-col gap-4 pt-2">
+				<p class="text-sm text-muted">
+					The room everyone sees. Changing it moves everyone off their seats. A theme pack is a .zip of a theme.json and its images, under 4 MB.
+				</p>
+				<div>
+					<input ref="packInput" type="file" accept=".zip,application/zip" class="sr-only" aria-label="Theme pack (.zip)" @change="pickPack" />
+					<UButton label="Upload a theme (.zip)" icon="i-pixelarticons-upload" :loading="uploading" @click="packInput?.click()" />
+				</div>
+				<div v-if="themesStatus === 'pending'" class="flex flex-col gap-3">
+					<USkeleton v-for="n in 2" :key="n" class="h-10 w-full" />
+				</div>
+				<ul v-else class="divide-y divide-default">
+					<li v-for="theme in themes" :key="theme.id" class="flex items-center gap-3 py-2.5">
+						<UIcon name="i-pixelarticons-image" class="size-4 shrink-0 text-muted" />
+						<div class="min-w-0 flex-1">
+							<p class="truncate text-sm font-medium text-highlighted">{{ theme.name }}</p>
+							<p class="text-xs text-muted">{{ theme.builtIn ? "Ships with the app" : `Uploaded ${new Date(theme.uploadedAtMs!).toLocaleDateString()}` }}</p>
+						</div>
+						<UBadge v-if="house.theme.id === theme.id" label="In use" variant="soft" size="sm" />
+						<UButton v-else label="Use" color="neutral" variant="subtle" size="sm" @click="sendIntent({ t: 'theme', themeId: theme.id })" />
+						<UTooltip v-if="!theme.builtIn" :text="house.theme.id === theme.id ? 'In use: pick another one first' : 'Remove this theme and its images'">
+							<UButton icon="i-pixelarticons-trash" color="error" variant="ghost" :aria-label="`Remove ${theme.name}`" :disabled="house.theme.id === theme.id" @click="removePack(theme.id)" />
+						</UTooltip>
 					</li>
 				</ul>
 			</div>

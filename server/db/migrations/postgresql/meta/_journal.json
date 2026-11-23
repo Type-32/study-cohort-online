@@ -50,6 +50,27 @@
       "when": 1795136515362,
       "tag": "0006_radio_queue",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1795153966505,
+      "tag": "0007_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1795394291748,
+      "tag": "0008_bands",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795395457031,
+      "tag": "0009_rooms",
+      "breakpoints": true
     }
   ]
 }
