@@ -2,6 +2,8 @@ import { expect, test } from 'bun:test'
 import { DEFAULT_DOOR_SOUND, FM_MAX, FM_MIN, bandStrip, doorSound, formatFrequency, nextRadio, nextUp, parseYouTubeLink, queuePositionFor, radioPositionMs, shelfOrder, stationFrequency } from '../shared/utils/radio'
 import type { DoorSoundSettings, Suggestion } from '../shared/utils/radio'
 import { playableItems } from '../server/utils/youtube'
+import { seatMembers, themePackSchema } from '../shared/utils/theme'
+import livingRoom from '../shared/themes/living-room.json'
 
 const ID = 'jfKfPfyJRdk'
 
@@ -140,4 +142,31 @@ test('playableItems keeps public and unlisted tracks in order, drops deleted and
 	}
 	expect(playableItems(page)).toEqual([{ videoId: 'aaaaaaaaaaa', title: 'One' }, { videoId: 'ddddddddddd', title: 'Four' }])
 	expect(playableItems({})).toEqual([])
+})
+
+test('the built-in pack is valid, and the schema refuses broken packs with a reason', () => {
+	expect(themePackSchema.safeParse(livingRoom).success).toBe(true)
+	const broken = (patch: object) => themePackSchema.safeParse({ ...livingRoom, ...patch })
+	expect(broken({ backdrop: '../secret.svg' }).success).toBe(false)
+	expect(broken({ backdrop: 'backdrop.gif' }).success).toBe(false)
+	expect(broken({ seats: [] }).success).toBe(false)
+	expect(broken({ seats: [{ id: 'a', x: 1, y: 1 }, { id: 'a', x: 2, y: 2 }] }).error?.issues[0]?.message).toBe('seat ids must be unique')
+	expect(broken({ radio: { slot: { x: 0, y: 0, width: 300, height: 400 } } }).success).toBe(false)
+	expect(broken({ format: 2 }).success).toBe(false)
+})
+
+test('seatMembers: open doors sit where they chose, others take the next free seat, the rest stand', () => {
+	const seats = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+	const m = (userId: string, door: string, slot: string | null) => ({ userId, door, slot })
+	const { seated, standing } = seatMembers(seats, [
+		m('ana', 'open', 'b'),
+		m('ben', 'open', 'b'), // b is taken: he gets the first free seat
+		m('cy', 'closed', 'c'), // closed doors aren't in the commons; their seat is free
+		m('di', 'open', 'gone'), // a seat this room doesn't have
+		m('ed', 'open', null),
+	])
+	expect(seated.get('b')?.userId).toBe('ana')
+	expect(seated.get('a')?.userId).toBe('ben')
+	expect(seated.get('c')?.userId).toBe('di')
+	expect(standing.map((s) => s.userId)).toEqual(['ed'])
 })

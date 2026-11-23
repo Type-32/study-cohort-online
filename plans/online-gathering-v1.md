@@ -18,7 +18,7 @@ Steps 6 to 11 and 14 were added on Nov 19; the canvas and traces moved from 6 an
 | 10 | The tuner: a dial of every track played before | Done Nov 19 | No migration |
 | 11 | Notes (text chat) | Done Nov 20 | Migration `0007` (applied) |
 | 11b | Bands: YouTube playlists on the radio | Done Nov 22 | Migration `0008` (applied); `NUXT_YOUTUBE_API_KEY` |
-| 12 | Canvas and theme packs | Planned | Skins the step 9 radio |
+| 12 | Canvas and theme packs | Done Nov 22 | Migration `0009` (applied); `S3_*` on Vercel for uploads |
 | 13 | Traces | Design after the two-week test | |
 | 14 | Voice | Spike first, after the two-week test | Media infrastructure outside Vercel |
 
@@ -688,12 +688,97 @@ Verified with the real API key against a throwaway Postgres 18 in `nuxt dev` on 
 - **Unit tests:** 10, including `parseYouTubeLink`, `bandStrip` and the API item filtering.
 - **In a browser:** the dial showed the band strip with 7 marks among the track ticks. The knob stepped into its track 4, where the LCD read `TRACK 4/7`, Play now was enabled (a jump within the band) and Queue disabled. A pasted `watch?v=…&list=…` link showed the band hint and became a `NEXT 1 · BAND · 11` cassette.
 
-## Step 12: canvas and theme packs
+## Step 12: canvas and theme packs (done Nov 22)
 
 - Add `pixi.js`. A client-only component draws the scene from a theme-pack JSON (backdrop, slots, object sprites) stored in S4.
 - The step 9 radio (which contains the YouTube iframe) is positioned over the canvas at the theme's radio slot and skinned by the theme pack (`radio: { slot, skin, frame? }`). Nuxt UI panels sit above.
 - Seats (moved from step 5): `member_state.slot` and `{ t: 'sit'; slot }`, publishing `member`. Slot ids come from the theme pack; the server rejects a slot the theme doesn't have.
 - First real use of the blob driver. MEGA S4's path-style support was confirmed in step 0.
+
+### Built (Nov 22)
+
+Decided Nov 22 (host's choices):
+
+- **Layout:** on wide screens the room is the page. The scene fills the window, the radio cabinet stands at the theme's radio slot, and the timer and the door controls float in a panel at the theme's panel spot. On phones the scene is a band at the top and the page stacks below it as before.
+- **Art:** I drew a first theme, "Living room", as flat SVG.
+- **Packs:** theme packs are uploaded by the host as a .zip and stored in blob storage (MEGA S4 in production).
+
+**The theme pack format** (`format: 1`, schema `themePackSchema` in `shared/utils/theme.ts`). A `theme.json` and the images it names, all in one folder; in a .zip, at the root or in one folder. Positions are in the pack's design units (`size`), and the scene keeps that shape, fits the window and fills the rest with `background`.
+
+| Field | What it is |
+| --- | --- |
+| `format`, `id`, `name` | `1`; an id like `cabin` (`a-z0-9-`); a display name |
+| `size` | `{ width, height }`: the design space (640–4096 by 360–4096) |
+| `background` | A colour (`#rrggbb`) around the scene |
+| `backdrop` | An image drawn at 0,0 over the whole design space |
+| `objects` | `[{ id, src, x, y, width, height, z? }]`: furniture, drawn in order of `z` |
+| `seats` | `[{ id, x, y }]`: where avatars sit (their centre); 1–60, unique ids |
+| `avatar` | `{ size, color }`: avatars are a circle with an initial |
+| `nooks` | `{ x, y, width, height, door, light, label }`: the rect members' doors stand in (one door per member present, bottom-aligned, sized to fit, name above), the door image, the lamp/door-light colour and the name colour |
+| `radio` | `{ slot: { x, y, width, height }, skin? }`: where the cabinet stands (at least 420 wide; it sits on the slot's bottom edge and scrolls if taller), and its colours per colour mode: `skin: { light?, dark?, radius? }` with any of `body, trim, key, lcdBg, lcdFg, grille, needle` |
+| `panel` | `{ x, y, width }`: where the timer and door panel floats (at least 320 wide) |
+
+Images are SVG, PNG, WebP or JPEG, named plainly (`door.svg`, no folders). The .zip stays under 4 MB, because Vercel refuses request bodies over 4.5 MB. SVGs with a script, `<foreignObject>` or an event handler are refused.
+
+**How it works**
+
+- **The scene:** `app/components/HouseScene.vue` uses PixiJS directly.
+  - It draws on demand (`autoStart: false`), not 60 times a second: the house sits in a background tab for hours.
+  - SVGs are rasterized at twice their size, so they stay sharp.
+  - It imports `pixi.js/unsafe-eval`: the site's Content Security Policy blocks `eval`, and without that module pixi refused to start.
+  - It's `aria-hidden`; the page keeps the member list (visually hidden in room mode) and adds a seat picker.
+- **The room's contents:**
+  - **Doors:** each member present has a door on the nook wall, lit by their door state. Open is a dark open doorway: they're out in the commons. Ajar is a warm halo and a bright gap at the edge. Closed is a light under the door, spilling onto the floor.
+  - **Seats:** members whose door is open sit on seats. `seatMembers()` in `shared/utils/theme.ts` decides who sits where, and the unit tests cover it. You sit where you chose; anyone else takes the next free seat; extras stand in their own doorway.
+  - **Picking a seat:** empty seats are rings you click while your door is open, or you use the seat picker.
+- **Placement:** the radio and the panel are real page content placed with CSS variables from the scene's fit (`--x/--y/--w/--h`). Their text isn't scaled, so it stays readable. A `room:` Tailwind variant marks room mode, `(min-width: 1024px) and (min-height: 600px)`. Both layouts use the same DOM nodes, so the YouTube player never remounts when the window crosses the breakpoint.
+- **The skin:** the radio's skin is applied after mount. The server doesn't know the colour mode, and its guess caused a hydration mismatch.
+- **Seats:**
+  - Seats are stored in `member_state.slot` and set with the `{ t: 'sit', slot }` intent, which publishes `member`.
+  - The server refuses a seat the theme doesn't have, or one a member present is in. Concurrent `sit`s are serialized with an advisory lock.
+  - A seat is kept across doors and visits.
+- **Themes:**
+  - The house's theme is in `house_state.theme`. The snapshot carries `theme: { id, version }`, where `version` is the upload time of an uploaded pack (0 for built-in ones).
+  - The host (admin) changes it with `{ t: 'theme', themeId }`. That publishes `theme` and empties every seat.
+  - Re-uploading the pack in use publishes `theme` with `keepSeats`: the new version is loaded, and only seats that no longer exist are emptied.
+  - Built-in packs come from the bundle, so the first render already has the layout. Uploaded ones are fetched (`GET /api/v1/themes/:id`).
+- **Packs on the server:**
+  - Built-in packs: JSON in `shared/themes/`, images in `public/themes/<id>/`.
+  - Uploaded packs: the JSON in `theme_pack`, the images in blob storage at `themes/<id>/<file>`.
+  - Routes:
+    - `GET /api/v1/themes` (list) and `GET /api/v1/themes/:id`;
+    - `POST /api/v1/themes` (upload, `pack` form field) and `DELETE /api/v1/themes/:id` (host only);
+    - `GET /api/v1/themes/:id/files/:file` (images). These need a session and are served with `Content-Security-Policy: sandbox`, `nosniff` and immutable caching; the URLs carry `?v=<version>`.
+  - The theme in use and built-in themes can't be removed.
+  - Upload refusals name the problem, e.g. "theme.json names door.svg, but the .zip has no door.svg next to it."
+- **Manage house:** a Themes tab lists packs, uploads a .zip, puts the house in a theme, and removes uploaded ones.
+- **Dependencies:** `fflate` added for unzipping. `vue3-pixi` was already installed and isn't used.
+
+Verified against a throwaway Postgres 18 in `nuxt dev` on port 3001, with the S3 variables unset so blob storage was NuxtHub's local `fs` driver and the production bucket wasn't touched. 34 protocol checks, all passing:
+
+- **Seats:** sitting; a taken seat and an unknown seat refused; the seat kept when the door closes.
+- **Access:** theme routes need a session (401), and uploads are for the host only (403).
+- **Upload refusals:** 8, each with its reason: not a zip, no `theme.json`, broken JSON, a schema error with its path, a missing image, a script in an SVG, a built-in id, over 4 MB.
+- **A good upload:** `theme.json` inside a folder of the zip.
+- **Serving:** the pack with its asset base; an image as SVG, sandboxed, immutable, and 401 without a session.
+- **Picking a theme:**
+  - a member can't change the theme;
+  - when the host does, a versioned message reaches everyone and everyone stands up;
+  - a late joiner gets the new theme;
+  - the old room's seat is refused and the new room's works.
+- **Re-uploading the theme in use:** a removed seat emptied and a kept one stayed.
+- **Removing:** the theme in use (409) and a built-in one can't be removed; another theme and its images are removed (204, then 404); picking a removed theme is refused.
+
+12 unit tests pass, including the built-in pack's validity, schema refusals and the seating rule.
+
+In a browser, in a 1280×800 frame (the test browser's own window is 390×225):
+
+- **Fit:** the canvas filled the frame (scale 0.8). The panel was at the theme's spot, 304 px wide. The radio stood in its 416 px slot with its bottom at the sideboard's top, without scrolling.
+- **Clicking a seat:** clicking an empty sofa seat in the canvas moved me there; the seat picker then read "Sofa middle".
+- **Doors:** with members held in by a script, the nook wall showed kai's closed door with light under it, mina's ajar door with a halo and a gap of light, and wilson's open doorway, with him on the sofa.
+- **Phone width:** at 390 px the scene was a 375×211 band with the page below and nothing past the edge, and there were no hydration warnings.
+
+Not checked: the radio skin in light mode, by eye; uploads to MEGA S4 itself; how the canvas performs with dozens of members.
 
 ## Step 13: traces
 

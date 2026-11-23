@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="110" height="200" viewBox="0 0 110 200">
+  <defs>
+    <g id="leaf">
+      <path d="M0 0 C11 -12 11 -38 0 -52 C-11 -38 -11 -12 0 0 Z"/>
+      <path d="M0 -3 L0 -46" stroke="#2f4a2c" stroke-opacity="0.45" stroke-width="1.2" fill="none"/>
+    </g>
+  </defs>
+  <!-- stems -->
+  <g stroke="#3a5a36" stroke-width="2" fill="none">
+    <path d="M55 144 Q50 110 34 84"/>
+    <path d="M55 144 Q60 108 76 84"/>
+    <path d="M55 144 Q55 100 55 60"/>
+    <path d="M55 144 Q48 132 40 128"/>
+    <path d="M55 144 Q62 132 70 128"/>
+  </g>
+  <!-- back leaves -->
+  <g fill="#3f6640">
+    <use xlink:href="#leaf" href="#leaf" transform="translate(34 84) rotate(-30)"/>
+    <use xlink:href="#leaf" href="#leaf" transform="translate(76 84) rotate(30)"/>
+    <use xlink:href="#leaf" href="#leaf" transform="translate(55 64) rotate(-8) scale(1.1)"/>
+    <use xlink:href="#leaf" href="#leaf" transform="translate(40 128) rotate(-62) scale(0.7)"/>
+    <use xlink:href="#leaf" href="#leaf" transform="translate(70 128) rotate(62) scale(0.7)"/>
+  </g>
+  <!-- front leaves -->
+  <g fill="#4f7a4a">
+    <use xlink:href="#leaf" href="#leaf" transform="translate(48 120) rotate(-25)"/>
+    <use xlink:href="#leaf" href="#leaf" transform="translate(62 118) rotate(22)"/>
+    <use xlink:href="#leaf" href="#leaf" transform="translate(42 136) rotate(-50) scale(0.85)"/>
+    <use xlink:href="#leaf" href="#leaf" transform="translate(68 136) rotate(50) scale(0.85)"/>
+  </g>
+  <g fill="#5f8c55">
+    <use xlink:href="#leaf" href="#leaf" transform="translate(55 104) rotate(4) scale(0.95)"/>
+    <use xlink:href="#leaf" href="#leaf" transform="translate(36 98) rotate(-48) scale(0.8)"/>
+    <use xlink:href="#leaf" href="#leaf" transform="translate(74 96) rotate(48) scale(0.8)"/>
+  </g>
+  <!-- pot -->
+  <path d="M30 152 L80 152 L74 198 L36 198 Z" fill="#b5653f"/>
+  <path d="M68 152 L80 152 L74 198 L66 198 Z" fill="#9a5232"/>
+  <rect x="25" y="140" width="60" height="14" rx="2" fill="#c47450"/>
+  <rect x="70" y="140" width="15" height="14" rx="2" fill="#a85c38"/>
+  <ellipse cx="55" cy="141" rx="28" ry="3" fill="#3d2a1d"/>
+</svg>

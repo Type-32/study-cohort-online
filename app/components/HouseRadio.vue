@@ -266,10 +266,29 @@ function openOnYouTube() {
 /** A key on the cabinet: at least 44 px, pressed in with a spring (`whilePress`). */
 const keyClass = "min-h-11 min-w-11 justify-center rounded-lg bg-(--radio-key) shadow-[inset_0_-2px_0_var(--radio-trim)] ring-1 ring-(--radio-trim)";
 const keyPress = { scale: 0.94, y: 1 };
+
+/**
+ * The theme's skin for the cabinet (step 12): its colours for the page's light or dark mode, over
+ * the defaults in the style block. Only the `--radio-*` variables change, never the layout. Applied
+ * after mount: the server doesn't know the colour mode, and a guess would mismatch on hydration.
+ */
+const { info: theme } = useHouseTheme();
+const colorMode = useColorMode();
+const mounted = useMounted();
+const skin = computed(() => {
+	const s = theme.value?.pack.radio.skin;
+	if (!s || !mounted.value) return {};
+	const colors = (colorMode.value === "dark" ? s.dark : s.light) ?? {};
+	const vars: Record<string, string> = { body: "--radio-body", trim: "--radio-trim", key: "--radio-key", lcdBg: "--radio-lcd-bg", lcdFg: "--radio-lcd-fg", grille: "--radio-grille", needle: "--radio-needle" };
+	return {
+		...Object.fromEntries(Object.entries(colors).map(([k, v]) => [vars[k], v])),
+		...(s.radius !== undefined ? { "--radio-radius": `${s.radius}px` } : {}),
+	};
+});
 </script>
 
 <template>
-	<section id="house-radio" class="radio flex scroll-mt-24 flex-col gap-4" aria-labelledby="radio-title">
+	<section id="house-radio" class="radio flex scroll-mt-24 flex-col gap-4" :style="skin" aria-labelledby="radio-title">
 		<!-- The LCD says this visually; screen readers get it in words. -->
 		<h2 id="radio-title" class="sr-only">Radio: {{ heading }}</h2>
 		<p class="sr-only">{{ [`${status}.`, byline && `${byline}.`, doorHint].filter(Boolean).join(" ") }}</p>

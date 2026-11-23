@@ -1,6 +1,10 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
 
+/* The room (step 12): wide and tall enough windows show the house as a scene with the radio and the
+   panel placed in it; smaller ones stack the page under a band of the scene. */
+@custom-variant room (@media (min-width: 1024px) and (min-height: 600px));
+
 @theme {
 	--font-sans: 'Figtree', 'DM Sans', sans-serif;
 	--font-mono: 'JetBrains Mono', monospace;

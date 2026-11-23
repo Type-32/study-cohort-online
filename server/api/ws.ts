@@ -1,6 +1,7 @@
 import { defineWebSocketHandler } from 'h3'
 import { addPeer, removePeer } from '#server/utils/bus'
-import { connect, disconnect, setDoor, touch } from '#server/utils/presence'
+import { connect, disconnect, setDoor, sit, touch } from '#server/utils/presence'
+import { setTheme } from '#server/utils/themes'
 import { setTimer, snapshot } from '#server/utils/house'
 import { HouseError, playerReport, queue, radioAction, setWhenEmpty, suggest, unsuggest } from '#server/utils/radioQueue'
 import { sendNote } from '#server/utils/notes'
@@ -79,6 +80,10 @@ async function handle(peer: Peer, message: Message) {
 			lastNoteAt.set(peer.id, now)
 			return sendNote(user, msg, msg.id).catch(reject('leave your note'))
 		}
+		case 'sit':
+			return sit(user, msg.slot, msg.id).catch(reject('take that seat'))
+		case 'theme':
+			return setTheme(user, msg.themeId, msg.id).catch(reject('change the theme'))
 		case 'radio':
 			switch (msg.action) {
 				case 'ended':

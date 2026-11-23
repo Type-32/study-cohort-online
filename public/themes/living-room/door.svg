@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="200" viewBox="0 0 100 200">
+  <!-- casing -->
+  <rect x="0" y="0" width="100" height="200" fill="#5a3e2b"/>
+  <rect x="0" y="0" width="100" height="3" fill="#7a5638"/>
+  <!-- leaf -->
+  <rect x="7" y="7" width="86" height="193" fill="#7a5638"/>
+  <rect x="7" y="7" width="86" height="3" fill="#4a3323" opacity="0.6"/>
+  <!-- panels -->
+  <g fill="#6b4a30" stroke="#5a3e2b" stroke-width="1.5">
+    <rect x="15" y="17" width="31" height="66" rx="1"/>
+    <rect x="54" y="17" width="31" height="66" rx="1"/>
+    <rect x="15" y="108" width="31" height="82" rx="1"/>
+    <rect x="54" y="108" width="31" height="82" rx="1"/>
+  </g>
+  <g fill="#8a6442">
+    <rect x="19" y="21" width="23" height="58"/>
+    <rect x="58" y="21" width="23" height="58"/>
+    <rect x="19" y="112" width="23" height="74"/>
+    <rect x="58" y="112" width="23" height="74"/>
+  </g>
+  <!-- brass knob -->
+  <rect x="80" y="86" width="7" height="20" rx="3" fill="#a9802f"/>
+  <circle cx="83.5" cy="96" r="5" fill="#d4a94a"/>
+  <circle cx="82" cy="94.5" r="1.8" fill="#f0d58a"/>
+</svg>

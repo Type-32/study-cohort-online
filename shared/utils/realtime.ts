@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { WHEN_EMPTY, playlistIdSchema, youtubeIdSchema } from './radio'
+import { slotIdSchema, themeIdSchema } from './theme'
 import type { RadioState, Suggestion, WhenEmpty } from './radio'
 
 // Wire protocol for /api/ws. Clients send intents; the server validates them and broadcasts
@@ -63,6 +64,10 @@ export const clientMsgSchema = z.discriminatedUnion('t', [
 	z.object({ t: z.literal('radioWhenEmpty'), mode: z.enum(WHEN_EMPTY), id: intentId }),
 	// Everyone. Trimmed; the client trims too, so its optimistic copy matches.
 	z.object({ t: z.literal('note'), noteId: z.uuid(), text: z.string().trim().min(1).max(NOTE_MAX_LENGTH), id: intentId }),
+	// Everyone: take a seat in the commons (one of the theme's seats, free).
+	z.object({ t: z.literal('sit'), slot: slotIdSchema, id: intentId }),
+	// Host (admin): the house's theme. (`id` is the intent's own id, so the theme's is `themeId`.)
+	z.object({ t: z.literal('theme'), themeId: themeIdSchema, id: intentId }),
 	z.discriminatedUnion('action', [
 		// Everyone.
 		z.object({ t: z.literal('radio'), action: z.enum(['pause', 'resume']), id: intentId }),
@@ -89,7 +94,12 @@ export interface MemberState {
 	userId: string
 	username: string
 	door: Door
+	/** Their seat in the commons (a seat id of the house's theme), or null: then the room seats them. */
+	slot: string | null
 }
+
+/** The house's theme pack. `version` changes when an uploaded pack is replaced (0 for built-in ones). */
+export type HouseTheme = { id: string; version: number }
 
 /** The shared focus timer. Clients count down from `endsAtServerMs` with their clock offset. */
 export type TimerState = { endsAtServerMs: number; minutes: number } | null
@@ -103,6 +113,7 @@ export interface HouseState {
 	radioWhenEmpty: WhenEmpty
 	/** Notes younger than 24 hours, oldest first (the last `NOTES_IN_SNAPSHOT` in a snapshot). */
 	notes: Note[]
+	theme: HouseTheme
 }
 
 /** `intent`: the id of the intent that caused this change, if any (see `intentId`). */
@@ -117,5 +128,7 @@ export type ServerMsg =
 	| { t: 'unsuggest'; suggestionId: string; intent?: string }
 	| { t: 'radioWhenEmpty'; mode: WhenEmpty; intent?: string }
 	| { t: 'note'; note: Note; intent?: string }
+	/** The theme changed: everyone stands up, unless `keepSeats` (the same pack, re-uploaded). */
+	| { t: 'theme'; theme: HouseTheme; keepSeats?: boolean; intent?: string }
 	/** Something the sender asked for failed; a fresh snapshot follows when there is one. */
 	| { t: 'error'; message: string; intent?: string }

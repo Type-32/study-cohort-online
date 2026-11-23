@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="90" height="320" viewBox="0 0 90 320">
+  <defs>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffd59a" stop-opacity="0.55"/>
+      <stop offset="0.6" stop-color="#ffd59a" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#ffd59a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e8b878"/>
+      <stop offset="1" stop-color="#ffd59a"/>
+    </linearGradient>
+  </defs>
+  <!-- glow -->
+  <ellipse cx="45" cy="70" rx="45" ry="64" fill="url(#glow)"/>
+  <!-- floor shadow + base -->
+  <ellipse cx="45" cy="314" rx="30" ry="4" fill="#1f1820" opacity="0.35"/>
+  <ellipse cx="45" cy="310" rx="24" ry="6" fill="#5a3e2b"/>
+  <ellipse cx="45" cy="308" rx="20" ry="4" fill="#7a5638"/>
+  <!-- pole -->
+  <rect x="43" y="90" width="4" height="218" fill="#8a6a3e"/>
+  <rect x="43" y="90" width="1.5" height="218" fill="#b08a52"/>
+  <rect x="41" y="200" width="8" height="5" rx="2" fill="#8a6a3e"/>
+  <!-- bulb glow under shade -->
+  <ellipse cx="45" cy="92" rx="30" ry="5" fill="#fff1d6"/>
+  <!-- shade -->
+  <path d="M26 38 L64 38 L76 92 L14 92 Z" fill="url(#shade)"/>
+  <path d="M26 38 L64 38 L65 41 L25 41 Z" fill="#c79a3e"/>
+  <path d="M14 89 L76 89 L76 92 L14 92 Z" fill="#c79a3e"/>
+  <path d="M33 41 L28 89 M45 41 L45 89 M57 41 L62 89" stroke="#f0c584" stroke-width="1.5" fill="none" opacity="0.7"/>
+</svg>

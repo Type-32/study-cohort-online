@@ -2,6 +2,7 @@ import { skipHydrate } from "pinia";
 import { NOTE_TTL_MS, PING_INTERVAL_MS } from "#shared/utils/realtime";
 import type { HouseState, Intent, PlayerReport, ServerMsg } from "#shared/utils/realtime";
 import { nextRadio, nextUp, queuePositionFor } from "#shared/utils/radio";
+import { DEFAULT_THEME } from "#shared/utils/theme";
 import type { Suggestion } from "#shared/utils/radio";
 import { useAuthSession } from "~/composables/core/useAuthSession";
 
@@ -72,6 +73,11 @@ function applyIntent(house: HouseState, { intent, atServerMs }: Pending, me: Me)
 		case "note":
 			if (!me) return house;
 			return { ...house, notes: [...house.notes, { id: intent.noteId, userId: me.id, username: me.username, text: intent.text, createdAtServerMs: atServerMs }] };
+		case "sit":
+			return { ...house, members: house.members.map((m) => (m.userId === me?.id ? { ...m, slot: intent.slot } : m)) };
+		case "theme":
+			// A new theme's version is the server's to name; everyone stands up at once.
+			return { ...house, theme: { id: intent.themeId, version: house.theme.id === intent.themeId ? house.theme.version : 0 }, members: house.members.map((m) => ({ ...m, slot: null })) };
 		case "radio":
 			switch (intent.action) {
 				case "play": {
@@ -105,7 +111,7 @@ function applyIntent(house: HouseState, { intent, atServerMs }: Pending, me: Me)
  */
 export const useHouseStore = defineStore("house", () => {
 	/** The house as the server last said it is. */
-	const confirmed = ref<HouseState>({ members: [], timer: null, radio: null, suggestions: [], radioWhenEmpty: "stop", notes: [] });
+	const confirmed = ref<HouseState>({ members: [], timer: null, radio: null, suggestions: [], radioWhenEmpty: "stop", notes: [], theme: { id: DEFAULT_THEME, version: 0 } });
 	/** serverMs - clientMs, from the last ping/pong. Add to Date.now() to get server time. */
 	const clockOffsetMs = ref(0);
 	/** True once the first snapshot since `connect` arrived. */
@@ -201,6 +207,11 @@ export const useHouseStore = defineStore("house", () => {
 					break;
 				case "note":
 					confirmed.value.notes = [...confirmed.value.notes.filter((n) => n.id !== msg.note.id), msg.note];
+					confirm(msg.intent);
+					break;
+				case "theme":
+					confirmed.value.theme = msg.theme;
+					if (!msg.keepSeats) confirmed.value.members = confirmed.value.members.map((m) => ({ ...m, slot: null }));
 					confirm(msg.intent);
 					break;
 				case "error":

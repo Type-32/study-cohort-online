@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="140" viewBox="0 0 600 140">
+  <!-- floor shadow -->
+  <ellipse cx="300" cy="136" rx="290" ry="4" fill="#1f1820" opacity="0.35"/>
+  <!-- legs -->
+  <g fill="#5a3e2b">
+    <path d="M24 118 L42 118 L37 140 L29 140 Z"/>
+    <path d="M558 118 L576 118 L571 140 L563 140 Z"/>
+    <path d="M292 118 L308 118 L304 136 L296 136 Z"/>
+  </g>
+  <!-- body -->
+  <rect x="10" y="14" width="580" height="106" fill="#7a5638"/>
+  <rect x="10" y="114" width="580" height="6" fill="#5a3e2b"/>
+  <!-- top -->
+  <rect x="0" y="0" width="600" height="12" rx="3" fill="#a27b52"/>
+  <rect x="0" y="0" width="600" height="3" rx="1.5" fill="#b58c62"/>
+  <rect x="4" y="12" width="592" height="4" fill="#5a3e2b"/>
+  <!-- left door -->
+  <rect x="18" y="22" width="140" height="88" rx="2" fill="#6b4a30"/>
+  <rect x="26" y="30" width="124" height="72" rx="2" fill="#8a6442" stroke="#5a3e2b" stroke-width="1.5"/>
+  <!-- right door -->
+  <rect x="442" y="22" width="140" height="88" rx="2" fill="#6b4a30"/>
+  <rect x="450" y="30" width="124" height="72" rx="2" fill="#8a6442" stroke="#5a3e2b" stroke-width="1.5"/>
+  <!-- drawers -->
+  <g fill="#8a6442" stroke="#5a3e2b" stroke-width="1.5">
+    <rect x="166" y="22" width="268" height="27" rx="2"/>
+    <rect x="166" y="52.5" width="268" height="27" rx="2"/>
+    <rect x="166" y="83" width="268" height="27" rx="2"/>
+  </g>
+  <!-- brass pulls -->
+  <g fill="#d4a94a">
+    <rect x="285" y="33" width="30" height="5" rx="2.5"/>
+    <rect x="285" y="63.5" width="30" height="5" rx="2.5"/>
+    <rect x="285" y="94" width="30" height="5" rx="2.5"/>
+    <circle cx="142" cy="66" r="4"/>
+    <circle cx="458" cy="66" r="4"/>
+  </g>
+  <g fill="#f0d58a">
+    <circle cx="141" cy="65" r="1.4"/>
+    <circle cx="457" cy="65" r="1.4"/>
+  </g>
+</svg>

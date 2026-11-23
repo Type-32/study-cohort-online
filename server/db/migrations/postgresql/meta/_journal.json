@@ -64,6 +64,13 @@
       "when": 1795394291748,
       "tag": "0008_bands",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1795395457031,
+      "tag": "0009_rooms",
+      "breakpoints": true
     }
   ]
 }

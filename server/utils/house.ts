@@ -2,7 +2,9 @@ import { db, schema } from '@nuxthub/db'
 import { publish } from '#server/utils/bus'
 import { presentMembers } from '#server/utils/presence'
 import { recentNotes } from '#server/utils/notes'
+import { houseTheme } from '#server/utils/themes'
 import { loadShelf, radioOf } from '#server/utils/radioQueue'
+import { DEFAULT_THEME } from '#shared/utils/theme'
 import type { HouseState, TimerState } from '#shared/utils/realtime'
 
 const { houseState } = schema
@@ -23,5 +25,5 @@ export async function setTimer(minutes: number | null, intent?: string) {
 
 export async function snapshot(): Promise<HouseState> {
 	const [members, row, suggestions, notes] = await Promise.all([presentMembers(), db.query.houseState.findFirst(), loadShelf(), recentNotes()])
-	return { members, timer: timerOf(row), radio: radioOf(row), suggestions, radioWhenEmpty: row?.radioWhenEmpty ?? 'stop', notes }
+	return { members, timer: timerOf(row), radio: radioOf(row), suggestions, radioWhenEmpty: row?.radioWhenEmpty ?? 'stop', notes, theme: await houseTheme(row?.theme ?? DEFAULT_THEME) }
 }

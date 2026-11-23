@@ -2,6 +2,7 @@ import {bigserial, boolean, check, index, integer, jsonb, pgTable, primaryKey, t
 import type {AnyPgColumn} from "drizzle-orm/pg-core";
 import {relations, sql} from "drizzle-orm";
 import type {RadioBand} from "#shared/utils/radio";
+import type {ThemePack} from "#shared/utils/theme";
 
 const createdUpdatedAtColumns = {
 	createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
@@ -83,6 +84,8 @@ export const houseState = pgTable("house_state", {
 	radioWhenEmpty: text({ enum: ["shuffle", "stop"] }).default("stop").notNull(),
 	/** Set while a band (a playlist) is on air: which one, and which of its tracks is `radioVideoId`. */
 	radioBand: jsonb().$type<RadioBand>(),
+	/** The house's theme pack: a built-in id or a `theme_pack` row (step 12). */
+	theme: text().default("living-room").notNull(),
 }, (t) => [check("house_state_single_row", sql`${t.id} = 1`)]);
 
 // What the server knows about a YouTube video, fetched once (oEmbed) and shared by suggestions,
@@ -142,11 +145,22 @@ export const radioBand = pgTable("radio_band", {
 	addedBy: text().references(() => user.id, { onDelete: "set null", onUpdate: "cascade" }),
 });
 
-// Durable per-member state. A member with no row has their door open.
+// Durable per-member state. A member with no row has their door open and no seat.
 export const memberState = pgTable("member_state", {
 	userId: text().primaryKey().references(() => user.id, { onDelete: "cascade", onUpdate: "cascade" }),
 	door: text({ enum: ["open", "ajar", "closed"] }).default("open").notNull(),
+	/** The seat in the commons this member picked (a seat id of the house's theme); cleared when the theme changes. */
+	slot: text(),
 	updatedAt: timestamp({ withTimezone: true }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+// Theme packs the host uploaded (step 12). `pack` is the validated `theme.json`; its images are in
+// blob storage under `themes/<id>/`. Built-in packs aren't here: they ship with the app.
+export const themePack = pgTable("theme_pack", {
+	id: text().primaryKey(),
+	pack: jsonb().$type<ThemePack>().notNull(),
+	uploadedBy: text().references(() => user.id, { onDelete: "set null", onUpdate: "cascade" }),
+	uploadedAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
 });
 
 // Notes left on the table (step 11). Each is deleted 24 hours after it was sent: there's no
